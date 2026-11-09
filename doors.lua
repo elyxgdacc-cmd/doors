@@ -1,5 +1,5 @@
 -- =============================================================================
--- DELTA MASTER v5.6.2
+-- DELTA MASTER v5.6.3
 -- =============================================================================
 
 if game.CoreGui:FindFirstChild("DeltaCheatMenuV5") then
@@ -109,7 +109,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -20, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DELTA MASTER v5.6.2"
+Title.Text = "DELTA MASTER v5.6.3"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 13
 Title.Font = Enum.Font.GothamBold
@@ -366,6 +366,20 @@ local function IsHeldByLocal(obj)
     return false
 end
 
+-- IDENTITY (dedupe): closest Model/Tool ancestor, or the part itself
+local function GetIdentity(obj)
+    if obj:IsA("Tool") then return obj end
+    if obj:IsA("Model") then return obj end
+    if obj:IsA("BasePart") then
+        local parent = obj.Parent
+        if parent and (parent:IsA("Model") or parent:IsA("Tool")) then
+            return parent
+        end
+        return obj
+    end
+    return obj
+end
+
 -- ROOM DETECTION
 local currentRoomModel = nil
 local currentRoomNumber = nil
@@ -415,25 +429,27 @@ local function DetectCurrentRoom()
     end
 end
 
+local roomCache = {}
+local roomCacheTick = 0
+
 local function InCurrentRoom(obj)
     if not currentRoomModel then return true end
-    if obj:IsDescendantOf(currentRoomModel) then return true end
-    local roomPart = currentRoomModel.PrimaryPart or currentRoomModel:FindFirstChildWhichIsA("BasePart")
-    local objPart = GetAdornee(obj)
-    if roomPart and objPart then
-        if (roomPart.Position - objPart.Position).Magnitude < 30 then return true end
+    local now = tick()
+    if roomCacheTick ~= now then
+        roomCache = {}
+        roomCacheTick = now
     end
-    return false
-end
-
--- TOP-LEVEL DEDUPE (one box per closet, etc.)
-local function GetTopLevelAncestor(obj)
-    local current = obj
-    local stopAt = (currentRoomModel and currentRoomModel.Parent) and currentRoomModel or workspace
-    while current.Parent and current.Parent ~= workspace and current.Parent ~= stopAt do
-        current = current.Parent
+    if roomCache[obj] ~= nil then return roomCache[obj] end
+    local result = obj:IsDescendantOf(currentRoomModel)
+    if not result then
+        local roomPart = currentRoomModel.PrimaryPart or currentRoomModel:FindFirstChildWhichIsA("BasePart")
+        local objPart = GetAdornee(obj)
+        if roomPart and objPart and (roomPart.Position - objPart.Position).Magnitude < 30 then
+            result = true
+        end
     end
-    return current
+    roomCache[obj] = result
+    return result
 end
 
 -- VISUAL BUILDERS
@@ -534,7 +550,7 @@ workspace.DescendantAdded:Connect(function(child)
     ShowEntityAlert(child.Name)
 end)
 
--- CANDIDATE FILTERS
+-- FILTERS
 local function IsItemCandidate(obj)
     if not obj or not obj.Parent then return false end
     if IsHeldByLocal(obj) then return false end
@@ -585,7 +601,6 @@ local function IsDoorCandidate(obj)
     local lname = string.lower(obj.Name)
     if not string.find(lname, "door", 1, true) then return false end
     if string.find(lname, "dupe", 1, true) then return false end
-    if not InCurrentRoom(obj) then return false end
     return true
 end
 
@@ -618,6 +633,13 @@ end
 local ItemEspCache, EntityEspCache, KeyEspCache = {}, {}, {}
 local BookEspCache, MechEspCache, BreakerEspCache, DoorEspCache = {}, {}, {}, {}
 local InteractEspCache = {}
+local ScannerEspCache = {}
+
+local function CacheCount(cache)
+    local n = 0
+    for _ in pairs(cache) do n = n + 1 end
+    return n
+end
 
 local function CleanupCache(cache, isCandidate)
     for obj, data in pairs(cache) do
@@ -630,31 +652,25 @@ local function CleanupCache(cache, isCandidate)
     end
 end
 
-local function CacheCount(cache)
-    local n = 0
-    for _ in pairs(cache) do n = n + 1 end
-    return n
-end
-
 local function AddEspObject(cache, obj, color, labelText, boxSize, transparency, zindex, useHighlight)
-    local top = GetTopLevelAncestor(obj)
-    if cache[top] then return end
+    local identity = GetIdentity(obj)
+    if cache[identity] then return end
     if CacheCount(cache) >= MAX_ESP_OBJECTS then return end
 
-    local pos = GetWorldPos(top) or GetWorldPos(obj)
+    local pos = GetWorldPos(identity) or GetWorldPos(obj)
     if not pos then return end
     if not WithinEspRange(pos) then return end
 
     local data = {}
     if useHighlight then
-        data.highlight = CreateDoorHighlight(top, top, color)
+        data.highlight = CreateDoorHighlight(identity, identity, color)
     else
-        local adornee = GetAdornee(top) or GetAdornee(obj)
+        local adornee = GetAdornee(identity) or GetAdornee(obj)
         if not adornee then return end
-        data.box = CreateEspBox(top, adornee, color, "DeltaEspBox", boxSize, transparency, zindex)
+        data.box = CreateEspBox(identity, adornee, color, "DeltaEspBox", boxSize, transparency, zindex)
     end
-    data.label = CreateEspLabel(top, labelText, color, useHighlight and 12 or 10)
-    cache[top] = data
+    data.label = CreateEspLabel(identity, labelText, color, useHighlight and 12 or 10)
+    cache[identity] = data
 end
 
 -- Entity pulse
@@ -672,7 +688,6 @@ end)
 -- SCANNER
 local ScanList = {}
 local ScanToggles = {}
-local ScannerEspCache = {}
 local lastScanDiscover = 0
 local lastScanSignature = ""
 
@@ -759,44 +774,6 @@ local function RenderScanListIfChanged()
     RenderScanList()
 end
 
-local function RefreshScannerEsp()
-    for obj, data in pairs(ScannerEspCache) do
-        if not obj or not obj.Parent then
-            if data.box and data.box.Parent then data.box:Destroy() end
-            if data.label and data.label.Parent then data.label:Destroy() end
-            ScannerEspCache[obj] = nil
-        else
-            local pos = GetWorldPos(obj)
-            local show = _G.ScannerNames[obj.Name] and pos and WithinEspRange(pos)
-            if data.box then data.box.Visible = show and true or false end
-            if data.label then data.label.Enabled = show and true or false end
-        end
-    end
-
-    if CacheCount(ScannerEspCache) >= MAX_SCANNER_OBJECTS then return end
-
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if CacheCount(ScannerEspCache) >= MAX_SCANNER_OBJECTS then break end
-        if (obj:IsA("Model") or obj:IsA("BasePart") or obj:IsA("Tool"))
-            and _G.ScannerNames[obj.Name] then
-            local top = GetTopLevelAncestor(obj)
-            if top == obj or not ScannerEspCache[top] then
-                if not ScannerEspCache[top] then
-                    local pos = GetWorldPos(obj)
-                    if pos and WithinEspRange(pos) then
-                        local adornee = GetAdornee(obj)
-                        if adornee then
-                            local box = CreateEspBox(top, adornee, CurrentThemeColor, "DeltaEspBox", Vector3.new(3, 3, 3), 0.5, 8)
-                            local label = CreateEspLabel(top, top.Name, CurrentThemeColor, 9)
-                            ScannerEspCache[top] = {box = box, label = label}
-                        end
-                    end
-                end
-            end
-        end
-    end
-end
-
 -- MAIN SCAN LOOP
 task.spawn(function()
     while true do
@@ -865,6 +842,27 @@ task.spawn(function()
             end
         end
 
+        -- Scanner ESP (uses the same `all` list)
+        if CacheCount(ScannerEspCache) < MAX_SCANNER_OBJECTS then
+            for _, obj in ipairs(all) do
+                if CacheCount(ScannerEspCache) >= MAX_SCANNER_OBJECTS then break end
+                if (obj:IsA("Model") or obj:IsA("BasePart") or obj:IsA("Tool")) and _G.ScannerNames[obj.Name] then
+                    local identity = GetIdentity(obj)
+                    if not ScannerEspCache[identity] then
+                        local pos = GetWorldPos(identity) or GetWorldPos(obj)
+                        if pos and WithinEspRange(pos) then
+                            local adornee = GetAdornee(identity) or GetAdornee(obj)
+                            if adornee then
+                                local box = CreateEspBox(identity, adornee, CurrentThemeColor, "DeltaEspBox", Vector3.new(3, 3, 3), 0.5, 8)
+                                local label = CreateEspLabel(identity, identity.Name, CurrentThemeColor, 9)
+                                ScannerEspCache[identity] = {box = box, label = label}
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
         CleanupCache(ItemEspCache, IsItemCandidate)
         CleanupCache(KeyEspCache, IsKeyCandidate)
         CleanupCache(BookEspCache, IsBookCandidate)
@@ -874,12 +872,24 @@ task.spawn(function()
         CleanupCache(EntityEspCache, IsEntityCandidate)
         CleanupCache(InteractEspCache, IsInteractable)
 
+        for obj, data in pairs(ScannerEspCache) do
+            if not obj or not obj.Parent or not _G.ScannerNames[obj.Name] then
+                if data.box and data.box.Parent then data.box:Destroy() end
+                if data.label and data.label.Parent then data.label:Destroy() end
+                ScannerEspCache[obj] = nil
+            else
+                local pos = GetWorldPos(obj)
+                local show = pos and WithinEspRange(pos)
+                if data.box then data.box.Visible = show and true or false end
+                if data.label then data.label.Enabled = show and true or false end
+            end
+        end
+
         if os.clock() - lastScanDiscover > 1.5 then
             lastScanDiscover = os.clock()
             DiscoverRoomNames()
             RenderScanListIfChanged()
         end
-        pcall(RefreshScannerEsp)
     end
 end)
 
@@ -894,7 +904,7 @@ AddToggleComponent(P_Combat, "Key ESP", "KeyEsp")
 AddToggleComponent(P_Combat, "Book ESP (Door 50)", "BookEsp")
 AddToggleComponent(P_Combat, "Mechanism ESP (Door 150)", "MechEsp")
 AddToggleComponent(P_Combat, "Breaker Pole ESP (Door 100)", "BreakerEsp")
-AddToggleComponent(P_Combat, "Door ESP (Current Room)", "DoorEsp")
+AddToggleComponent(P_Combat, "Door ESP", "DoorEsp")
 AddToggleComponent(P_Combat, "Entity ESP (Global)", "EntityEsp")
 AddToggleComponent(P_Combat, "Entity ESP - Named", "EntityEspNamed")
 AddToggleComponent(P_Combat, "Entity Spawn Alert", "EntityAlert", function(state)
@@ -980,7 +990,6 @@ function StartCheatEngineLoops()
         end
     end)
 
-    -- Player ESP (throttled to 10fps)
     local playerEspAccum = 0
     RunService.Heartbeat:Connect(function(dt)
         playerEspAccum = playerEspAccum + dt
