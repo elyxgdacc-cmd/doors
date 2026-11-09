@@ -1,5 +1,5 @@
 -- =============================================================================
--- DELTA MASTER v5.6.6 — DISTANCE-SCOPED, NO ROOM DETECTION
+-- DELTA MASTER v5.6.7 — RUSH-READY, WALKSPEED-ONLY
 -- =============================================================================
 
 if game.CoreGui:FindFirstChild("DeltaCheatMenuV5") then
@@ -42,7 +42,7 @@ _G.MechEsp = false
 _G.BreakerEsp = false
 _G.DoorEsp = false
 _G.EntityEsp = false
-_G.EntityEspNamed = false
+_G.EntityEspNamed = true
 _G.EntityAlert = false
 _G.InteractablesEsp = false
 _G.ScannerNames = {}
@@ -109,7 +109,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -20, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DELTA MASTER v5.6.6"
+Title.Text = "DELTA MASTER v5.6.7"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 13
 Title.Font = Enum.Font.GothamBold
@@ -468,16 +468,6 @@ local function ShowEntityAlert(entityName)
 end
 
 local alertDebounce = {}
-workspace.DescendantAdded:Connect(function(child)
-    if not _G.EntityAlert then return end
-    if not (child:IsA("Model") or child:IsA("BasePart")) then return end
-    local kw = MatchesKeyword(child.Name, ENTITY_KEYWORDS)
-    if not kw then return end
-    local now = os.clock()
-    if alertDebounce[kw] and now - alertDebounce[kw] < 3 then return end
-    alertDebounce[kw] = now
-    ShowEntityAlert(child.Name)
-end)
 
 -- =============================================================================
 -- FILTERS
@@ -531,12 +521,17 @@ local function IsDoorCandidate(obj)
     return true
 end
 
+-- BROADENED: catches Rush whether Model, BasePart, or MeshPart
 local function IsEntityCandidate(obj)
-    if not obj or not obj.Parent or not obj:IsA("Model") then return false end
+    if not obj or not obj.Parent then return false end
+    if not (obj:IsA("Model") or obj:IsA("BasePart") or obj:IsA("MeshPart")) then return false end
     if IsPlayerCharacter(obj) then return false end
-    local hum = obj:FindFirstChildOfClass("Humanoid")
-    if hum and hum.Health > 0 then return true end
-    if _G.EntityEspNamed and MatchesKeyword(obj.Name, ENTITY_KEYWORDS) then return true end
+
+    if obj:IsA("Model") then
+        local hum = obj:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health > 0 then return true end
+    end
+    if MatchesKeyword(obj.Name, ENTITY_KEYWORDS) then return true end
     return false
 end
 
@@ -603,7 +598,40 @@ local function AddEspObject(cache, obj, color, labelText, boxSize, transparency,
 end
 
 -- =============================================================================
--- MAIN SCAN — DISTANCE-SCOPED, CHUNKED, NO ROOM DETECTION
+-- ENTITY INSTANT DETECTION (Rush fix)
+-- =============================================================================
+
+local function TryEntityEspNow(obj)
+    if not obj or not obj.Parent then return end
+    if not _G.EntityEsp then return end
+    if not obj:IsDescendantOf(workspace) then return end
+    if not IsEntityCandidate(obj) then return end
+    local pos = GetWorldPos(obj)
+    if not pos or not WithinEspRange(pos) then return end
+    AddEspObject(EntityEspCache, obj, Color3.fromRGB(255, 30, 30), "⚠ " .. obj.Name, Vector3.new(7, 9, 7), 0.25, 20, false)
+end
+
+workspace.DescendantAdded:Connect(function(child)
+    -- Alert
+    if _G.EntityAlert and (child:IsA("Model") or child:IsA("BasePart")) then
+        local kw = MatchesKeyword(child.Name, ENTITY_KEYWORDS)
+        if kw then
+            local now = os.clock()
+            if not (alertDebounce[kw] and now - alertDebounce[kw] < 3) then
+                alertDebounce[kw] = now
+                ShowEntityAlert(child.Name)
+            end
+        end
+    end
+    -- Instant ESP (Rush dies before next scan otherwise)
+    if _G.EntityEsp then
+        TryEntityEspNow(child)
+        task.delay(0.1, function() TryEntityEspNow(child) end)
+    end
+end)
+
+-- =============================================================================
+-- MAIN SCAN
 -- =============================================================================
 
 local scanIndex = 1
@@ -613,8 +641,6 @@ local lastObjectCount = 0
 
 local function ProcessOneObject(obj)
     if not obj or not obj.Parent then return end
-
-    -- Distance gate (this is the "current room" filter now)
     local pos = GetWorldPos(obj)
     if not pos then return end
     if not WithinEspRange(pos) then return end
@@ -644,7 +670,7 @@ local function ProcessOneObject(obj)
         if nv then label = obj.Name .. " (" .. tostring(nv.Value) .. ")" end
         AddEspObject(DoorEspCache, obj, Color3.fromRGB(255, 220, 0), label, nil, nil, nil, true)
     end
-    if _G.EntityEsp and (obj:IsA("Model") or obj:IsA("BasePart")) and IsEntityCandidate(obj) then
+    if _G.EntityEsp and IsEntityCandidate(obj) then
         AddEspObject(EntityEspCache, obj, Color3.fromRGB(255, 30, 30), "⚠ " .. obj.Name, Vector3.new(7, 9, 7), 0.25, 20, false)
     end
     if _G.ScannerNames[obj.Name] and CacheCount(ScannerEspCache) < MAX_SCANNER_OBJECTS then
@@ -682,9 +708,7 @@ task.spawn(function()
                 end
             end
             scanIndex = endIdx + 1
-            if scanIndex > #scanList then
-                scanIndex = 1
-            end
+            if scanIndex > #scanList then scanIndex = 1 end
         end
 
         CleanupCache(ItemEspCache, IsItemCandidate)
@@ -739,7 +763,6 @@ AddToggleComponent(P_Combat, "Mechanism ESP (Door 150)", "MechEsp")
 AddToggleComponent(P_Combat, "Breaker Pole ESP (Door 100)", "BreakerEsp")
 AddToggleComponent(P_Combat, "Door ESP", "DoorEsp")
 AddToggleComponent(P_Combat, "Entity ESP (Global)", "EntityEsp")
-AddToggleComponent(P_Combat, "Entity ESP - Named", "EntityEspNamed")
 AddToggleComponent(P_Combat, "Entity Spawn Alert", "EntityAlert", function(state)
     if not state then return end
     task.spawn(function()
@@ -779,7 +802,7 @@ for name, hex in pairs(Presets) do
 end
 
 -- =============================================================================
--- RUNTIME
+-- RUNTIME (WALKSPEED ONLY)
 -- =============================================================================
 
 function StartCheatEngineLoops()
@@ -793,16 +816,16 @@ function StartCheatEngineLoops()
     end)
 
     RunService.Heartbeat:Connect(function()
-        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character:FindFirstChild("Humanoid") then
-            local humanoid = LocalPlayer.Character.Humanoid
-            local rootPart = LocalPlayer.Character.HumanoidRootPart
-            if humanoid.MoveDirection.Magnitude > 0 and _G.SpeedValue > 16 then
-                local v = humanoid.MoveDirection * _G.SpeedValue
-                rootPart.AssemblyLinearVelocity = Vector3.new(v.X, rootPart.AssemblyLinearVelocity.Y, v.Z)
-            else
+        if LocalPlayer.Character then
+            local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
                 humanoid.WalkSpeed = _G.SpeedValue
+                if humanoid.UseJumpPower then
+                    humanoid.JumpPower = _G.JumpValue
+                else
+                    humanoid.JumpHeight = _G.JumpValue
+                end
             end
-            if humanoid.UseJumpPower then humanoid.JumpPower = _G.JumpValue else humanoid.JumpHeight = _G.JumpValue end
         end
         if _G.Fullbright then
             Lighting.Ambient = Color3.fromRGB(255, 255, 255); Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255); Lighting.Brightness = 2; Lighting.GlobalShadows = false
