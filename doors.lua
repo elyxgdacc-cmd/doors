@@ -1,5 +1,5 @@
 -- =============================================================================
--- DELTA MASTER v5.6.5 — ROOM-SCOPED, NON-LAG, FAST
+-- DELTA MASTER v5.6.6 — DISTANCE-SCOPED, NO ROOM DETECTION
 -- =============================================================================
 
 if game.CoreGui:FindFirstChild("DeltaCheatMenuV5") then
@@ -33,7 +33,7 @@ _G.AntiAfk = true
 
 _G.BoxEsp = false
 _G.EspTeamColor = false
-_G.EspRange = 300
+_G.EspRange = 200
 _G.ItemEsp = false
 _G.ItemEspToolsOnly = false
 _G.KeyEsp = false
@@ -65,7 +65,7 @@ local Presets = {
 }
 
 -- =============================================================================
--- UI (identical to v5.6.4)
+-- UI
 -- =============================================================================
 
 local ScreenGui = Instance.new("ScreenGui")
@@ -109,7 +109,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -20, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DELTA MASTER v5.6.5"
+Title.Text = "DELTA MASTER v5.6.6"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 13
 Title.Font = Enum.Font.GothamBold
@@ -289,12 +289,6 @@ local ENTITY_KEYWORDS = {
     "entity", "monster", "enemy", "boss",
 }
 local MECHANISM_KEYWORDS = { "anchor", "generator", "lever", "circuit", "breaker" }
-local SCANNER_KEYWORDS = {
-    "key", "lighter", "lockpick", "flashlight", "torch",
-    "book", "breaker", "pole", "anchor", "generator", "lever",
-    "door", "button", "switch", "fuse", "battery", "candle",
-    "closet", "wardrobe", "room", "hint", "prompt", "pickup", "item",
-}
 local PICKUP_HINTS = { "pick", "take", "grab", "collect", "use" }
 
 local MAX_ESP_OBJECTS = 60
@@ -372,7 +366,6 @@ local function GetIdentity(obj)
     return obj
 end
 
--- FIX: check identity, not obj, so duplicates in backpack are caught
 local function IsHeldByLocal(obj)
     local identity = GetIdentity(obj)
     if not LocalPlayer.Character then return false end
@@ -487,7 +480,7 @@ workspace.DescendantAdded:Connect(function(child)
 end)
 
 -- =============================================================================
--- CANDIDATE FILTERS (no InCurrentRoom — scan is already room-scoped)
+-- FILTERS
 -- =============================================================================
 
 local function IsItemCandidate(obj)
@@ -610,165 +603,22 @@ local function AddEspObject(cache, obj, color, labelText, boxSize, transparency,
 end
 
 -- =============================================================================
--- ROOM DETECTION (runs every tick until found)
--- =============================================================================
-
-local currentRoomModel = nil
-local currentRoomNumber = nil
-local lastRoomCheck = 0
-local roomChanged = false
-
-local function DetectCurrentRoom()
-    local pg = LocalPlayer:FindFirstChild("PlayerGui")
-    if pg then
-        local hint = pg:FindFirstChild("Hint")
-        if hint and hint:IsA("TextLabel") then
-            local num = string.match(hint.Text, "%d+")
-            if num then
-                local newNum = tonumber(num)
-                if newNum ~= currentRoomNumber then
-                    currentRoomNumber = newNum
-                    currentRoomModel = nil
-                    roomChanged = true
-                end
-            end
-        end
-    end
-
-    if currentRoomModel and currentRoomModel.Parent then return end
-    if os.clock() - lastRoomCheck < 1 then return end
-    lastRoomCheck = os.clock()
-
-    if currentRoomNumber then
-        for _, obj in pairs(workspace:GetChildren()) do
-            if obj:IsA("Model") and string.find(obj.Name, tostring(currentRoomNumber), 1, true) then
-                currentRoomModel = obj
-                roomChanged = true
-                break
-            end
-        end
-    end
-
-    if not currentRoomModel then
-        local hrp = GetLocalHRP()
-        if hrp then
-            local bestDist, bestModel = math.huge, nil
-            for _, obj in pairs(workspace:GetChildren()) do
-                if obj:IsA("Model") and (string.find(string.lower(obj.Name), "room") or string.find(string.lower(obj.Name), "door")) then
-                    local p = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
-                    if p then
-                        local d = (hrp.Position - p.Position).Magnitude
-                        if d < bestDist then bestDist, bestModel = d, obj end
-                    end
-                end
-            end
-            if bestModel and bestDist < 150 then
-                currentRoomModel = bestModel
-                roomChanged = true
-            end
-        end
-    end
-end
-
--- =============================================================================
--- SCANNER STATE
--- =============================================================================
-
-local ScanList = {}
-local ScanToggles = {}
-local lastScanDiscover = 0
-local lastScanSignature = ""
-
-local function IsInterestingForScanner(obj)
-    if not obj or not obj.Parent then return false end
-    if obj:IsA("Terrain") or obj:IsA("Camera") then return false end
-    if string.find(obj.Name, "^Delta") then return false end
-    if not (obj:IsA("Model") or obj:IsA("BasePart") or obj:IsA("Tool")) then return false end
-    if obj:IsA("Tool") then return true end
-    if currentRoomModel and obj == currentRoomModel then return false end
-    if MatchesKeyword(obj.Name, SCANNER_KEYWORDS) then return true end
-    if obj:FindFirstChildWhichIsA("ProximityPrompt", true) then return true end
-    if obj:FindFirstChildWhichIsA("ClickDetector", true) then return true end
-    return false
-end
-
-local function DiscoverRoomNames(scanList)
-    local found = {}
-    for _, obj in ipairs(scanList) do
-        if IsInterestingForScanner(obj) then found[obj.Name] = true end
-    end
-    local newList = {}
-    for name in pairs(found) do table.insert(newList, name) end
-    table.sort(newList)
-    ScanList = newList
-end
-
-local function RenderScanList()
-    for _, ui in pairs(ScanToggles) do
-        if ui and ui.Parent then ui:Destroy() end
-    end
-    ScanToggles = {}
-
-    local header = Instance.new("TextLabel")
-    header.Size = UDim2.new(1, 0, 0, 24)
-    header.BackgroundTransparency = 1
-    header.Text = "Objects in current room (" .. #ScanList .. "):"
-    header.TextColor3 = CurrentThemeColor
-    header.Font = Enum.Font.GothamBold
-    header.TextSize = 11
-    header.TextXAlignment = Enum.TextXAlignment.Left
-    header.Parent = P_Scanner
-    ScanToggles["__header"] = header
-
-    for _, name in ipairs(ScanList) do
-        local row = Instance.new("Frame")
-        row.Size = UDim2.new(1, 0, 0, 30)
-        row.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-        local rc = Instance.new("UICorner"); rc.CornerRadius = UDim.new(0, 6); rc.Parent = row
-        local lbl = Instance.new("TextLabel")
-        lbl.Size = UDim2.new(0.7, 0, 1, 0)
-        lbl.Position = UDim2.new(0, 10, 0, 0)
-        lbl.BackgroundTransparency = 1
-        lbl.Text = name
-        lbl.TextColor3 = Color3.fromRGB(240, 240, 240)
-        lbl.Font = Enum.Font.GothamMedium
-        lbl.TextSize = 11
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-        lbl.Parent = row
-        local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0, 50, 0, 22)
-        btn.Position = UDim2.new(1, -60, 0, 4)
-        btn.BackgroundColor3 = _G.ScannerNames[name] and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(60, 60, 60)
-        btn.Text = _G.ScannerNames[name] and "ON" or "OFF"
-        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        btn.Font = Enum.Font.GothamBold
-        btn.TextSize = 10
-        local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 4); bc.Parent = btn
-        btn.MouseButton1Click:Connect(function()
-            _G.ScannerNames[name] = not _G.ScannerNames[name]
-            btn.Text = _G.ScannerNames[name] and "ON" or "OFF"
-            btn.BackgroundColor3 = _G.ScannerNames[name] and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(60, 60, 60)
-        end)
-        row.Parent = P_Scanner
-        ScanToggles[name] = row
-    end
-end
-
-local function RenderScanListIfChanged()
-    local sig = table.concat(ScanList, "|")
-    if sig == lastScanSignature then return end
-    lastScanSignature = sig
-    RenderScanList()
-end
-
--- =============================================================================
--- SCAN — ROOM ONLY, CONTINUOUS, CHUNKED
+-- MAIN SCAN — DISTANCE-SCOPED, CHUNKED, NO ROOM DETECTION
 -- =============================================================================
 
 local scanIndex = 1
 local scanList = {}
+local lastScanRebuild = 0
+local lastObjectCount = 0
 
 local function ProcessOneObject(obj)
+    if not obj or not obj.Parent then return end
+
+    -- Distance gate (this is the "current room" filter now)
+    local pos = GetWorldPos(obj)
+    if not pos then return end
+    if not WithinEspRange(pos) then return end
+
     if _G.InteractablesEsp and IsInteractable(obj) then
         AddEspObject(InteractEspCache, obj, CurrentThemeColor, obj.Name, Vector3.new(3, 3, 3), 0.4, 15, false)
     end
@@ -800,14 +650,11 @@ local function ProcessOneObject(obj)
     if _G.ScannerNames[obj.Name] and CacheCount(ScannerEspCache) < MAX_SCANNER_OBJECTS then
         local identity = GetIdentity(obj)
         if not ScannerEspCache[identity] then
-            local pos = GetWorldPos(identity) or GetWorldPos(obj)
-            if pos and WithinEspRange(pos) then
-                local adornee = GetAdornee(identity) or GetAdornee(obj)
-                if adornee then
-                    local box = CreateEspBox(identity, adornee, CurrentThemeColor, "DeltaEspBox", Vector3.new(3, 3, 3), 0.5, 8)
-                    local label = CreateEspLabel(identity, identity.Name, CurrentThemeColor, 9)
-                    ScannerEspCache[identity] = {box = box, label = label}
-                end
+            local adornee = GetAdornee(identity) or GetAdornee(obj)
+            if adornee then
+                local box = CreateEspBox(identity, adornee, CurrentThemeColor, "DeltaEspBox", Vector3.new(3, 3, 3), 0.5, 8)
+                local label = CreateEspLabel(identity, identity.Name, CurrentThemeColor, 9)
+                ScannerEspCache[identity] = {box = box, label = label}
             end
         end
     end
@@ -816,25 +663,16 @@ end
 task.spawn(function()
     while true do
         task.wait(0.15)
-        DetectCurrentRoom()
 
-        -- Rebuild scan list only on room change — never falls back to workspace
-        if roomChanged or #scanList == 0 then
-            if currentRoomModel and currentRoomModel.Parent then
-                scanList = currentRoomModel:GetDescendants()
-                scanIndex = 1
-                roomChanged = false
-                lastScanDiscover = os.clock()
-                DiscoverRoomNames(scanList)
-                RenderScanListIfChanged()
-            else
-                -- no room detected — wait, don't scan
-                scanList = {}
-                scanIndex = 1
-            end
+        local now = os.clock()
+        local currentCount = #workspace:GetDescendants()
+        if now - lastScanRebuild > 3 or math.abs(currentCount - lastObjectCount) > 50 then
+            scanList = workspace:GetDescendants()
+            scanIndex = 1
+            lastScanRebuild = now
+            lastObjectCount = currentCount
         end
 
-        -- Continuous chunked scan of current room's objects only
         if #scanList > 0 then
             local endIdx = math.min(scanIndex + SCAN_CHUNK - 1, #scanList)
             for i = scanIndex, endIdx do
@@ -845,11 +683,10 @@ task.spawn(function()
             end
             scanIndex = endIdx + 1
             if scanIndex > #scanList then
-                scanIndex = 1  -- loop, don't rebuild
+                scanIndex = 1
             end
         end
 
-        -- Cleanup
         CleanupCache(ItemEspCache, IsItemCandidate)
         CleanupCache(KeyEspCache, IsKeyCandidate)
         CleanupCache(BookEspCache, IsBookCandidate)
@@ -892,7 +729,7 @@ end)
 
 AddToggleComponent(P_Combat, "Box ESP (Players)", "BoxEsp")
 AddToggleComponent(P_Combat, "ESP Team Colors", "EspTeamColor")
-AddInputComponent(P_Combat, "ESP Range (studs):", "300", function(val) _G.EspRange = val end)
+AddInputComponent(P_Combat, "ESP Range (studs):", "200", function(val) _G.EspRange = val end)
 AddToggleComponent(P_Combat, "Interactables ESP", "InteractablesEsp")
 AddToggleComponent(P_Combat, "Item ESP", "ItemEsp")
 AddToggleComponent(P_Combat, "Item ESP - Tools Only", "ItemEspToolsOnly")
