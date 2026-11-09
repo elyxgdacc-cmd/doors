@@ -1,5 +1,5 @@
 -- =============================================================================
--- DELTA MASTER v5.6.8 — SPEED CAP 20 + VELOCITY ASSIST
+-- DELTA MASTER v5.6.9 — SPEED CAP 20, AUTO-HIDE, AUTO-OPEN, AUTO-COLLECT
 -- =============================================================================
 
 if game.CoreGui:FindFirstChild("DeltaCheatMenuV5") then
@@ -42,10 +42,17 @@ _G.MechEsp = false
 _G.BreakerEsp = false
 _G.DoorEsp = false
 _G.EntityEsp = false
-_G.EntityEspNamed = true
 _G.EntityAlert = false
 _G.InteractablesEsp = false
 _G.ScannerNames = {}
+
+_G.AutoHide = false
+_G.AutoHideRange = 80
+_G.AutoHideEntityList = { "rush", "ambush" }
+_G.AutoOpenContainers = false
+_G.AutoCollectItems = false
+_G.ContainerRange = 30
+_G.CollectRange = 15
 
 local LightBackup = {
     Ambient = Lighting.Ambient,
@@ -109,7 +116,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -20, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DELTA MASTER v5.6.8"
+Title.Text = "DELTA MASTER v5.6.9"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 13
 Title.Font = Enum.Font.GothamBold
@@ -147,6 +154,7 @@ end
 
 local P_Movement = CreatePageFrame()
 local P_Combat = CreatePageFrame()
+local P_Automation = CreatePageFrame()
 local P_Scanner = CreatePageFrame()
 local P_Settings = CreatePageFrame()
 
@@ -162,7 +170,8 @@ local function SetupTabLink(btnName, targetPage, yPos)
     btn.Parent = TabBar
     local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 6); c.Parent = btn
     btn.MouseButton1Click:Connect(function()
-        P_Movement.Visible = false; P_Combat.Visible = false; P_Scanner.Visible = false; P_Settings.Visible = false
+        P_Movement.Visible = false; P_Combat.Visible = false; P_Automation.Visible = false
+        P_Scanner.Visible = false; P_Settings.Visible = false
         targetPage.Visible = true
     end)
     return btn
@@ -170,8 +179,9 @@ end
 
 SetupTabLink("Movement", P_Movement, 8)
 SetupTabLink("Visuals/ESP", P_Combat, 33)
-SetupTabLink("Scanner", P_Scanner, 58)
-SetupTabLink("Settings", P_Settings, 83)
+SetupTabLink("Automation", P_Automation, 58)
+SetupTabLink("Scanner", P_Scanner, 83)
+SetupTabLink("Settings", P_Settings, 108)
 
 P_Movement.Visible = true
 
@@ -290,6 +300,13 @@ local ENTITY_KEYWORDS = {
 }
 local MECHANISM_KEYWORDS = { "anchor", "generator", "lever", "circuit", "breaker" }
 local PICKUP_HINTS = { "pick", "take", "grab", "collect", "use" }
+
+local CONTAINER_KEYWORDS = {
+    "drawer", "chest", "desk", "dresser", "nightstand",
+    "locker", "toolbox", "cabinet", "shelf", "compartment"
+}
+local OPEN_KEYWORDS = { "open", "search", "loot", "unlock", "check", "take" }
+local DENY_KEYWORDS = { "hide", "enter", "climb", "use", "sit", "crawl" }
 
 local MAX_ESP_OBJECTS = 60
 local MAX_SCANNER_OBJECTS = 40
@@ -549,6 +566,153 @@ local function IsInteractable(obj)
 end
 
 -- =============================================================================
+-- AUTO FUNCTIONS
+-- =============================================================================
+
+local activeEntity = nil
+local isHiding = false
+local hidingCloset = nil
+local hideDebounce = 0
+local openDebounce = {}
+
+local function IsAutoHideEntity(obj)
+    if not obj or not obj.Parent then return false end
+    local lname = string.lower(obj.Name)
+    for _, kw in ipairs(_G.AutoHideEntityList) do
+        if string.find(lname, kw, 1, true) then return true end
+    end
+    return false
+end
+
+local function FindActiveEntity()
+    local hrp = GetLocalHRP()
+    if not hrp then return nil, math.huge end
+    local closest, closestDist = nil, math.huge
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if (obj:IsA("Model") or obj:IsA("BasePart")) and IsAutoHideEntity(obj) then
+            local pos = GetWorldPos(obj)
+            if pos then
+                local dist = (hrp.Position - pos).Magnitude
+                if dist < closestDist then closest, closestDist = obj, dist end
+            end
+        end
+    end
+    return closest, closestDist
+end
+
+local function FindNearestCloset()
+    local hrp = GetLocalHRP()
+    if not hrp then return nil end
+    local bestDist, bestCloset = math.huge, nil
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if (obj:IsA("Model") or obj:IsA("BasePart")) then
+            local lname = string.lower(obj.Name)
+            if string.find(lname, "closet", 1, true) or string.find(lname, "wardrobe", 1, true) then
+                local pos = GetWorldPos(obj)
+                if pos then
+                    local d = (hrp.Position - pos).Magnitude
+                    if d < bestDist then bestDist, bestCloset = d, obj end
+                end
+            end
+        end
+    end
+    return bestCloset, bestDist
+end
+
+local function ToggleClosetPrompt(closet)
+    if not closet then return false end
+    local prompt = closet:FindFirstChildWhichIsA("ProximityPrompt", true)
+    if not prompt then return false end
+    pcall(function() fireproximityprompt(prompt) end)
+    return true
+end
+
+local function RunAutoHide()
+    if not _G.AutoHide then
+        if isHiding and hidingCloset then
+            ToggleClosetPrompt(hidingCloset)
+            isHiding = false; hidingCloset = nil
+        end
+        return
+    end
+    local entity, dist = FindActiveEntity()
+    if not entity or dist > _G.AutoHideRange then
+        if isHiding and hidingCloset then
+            ToggleClosetPrompt(hidingCloset)
+            isHiding = false; hidingCloset = nil
+        end
+        return
+    end
+    if not isHiding then
+        local now = os.clock()
+        if now - hideDebounce < 0.5 then return end
+        hideDebounce = now
+        local closet = FindNearestCloset()
+        if closet and ToggleClosetPrompt(closet) then
+            isHiding = true; hidingCloset = closet
+        end
+    end
+end
+
+local function IsContainerName(name)
+    local lname = string.lower(name)
+    for _, kw in ipairs(CONTAINER_KEYWORDS) do
+        if string.find(lname, kw, 1, true) then return true end
+    end
+    return false
+end
+
+local function IsOpenPrompt(prompt)
+    local action = string.lower(prompt.ActionText or "")
+    local object = string.lower(prompt.ObjectText or "")
+    for _, kw in ipairs(DENY_KEYWORDS) do
+        if string.find(action, kw, 1, true) or string.find(object, kw, 1, true) then return false end
+    end
+    for _, kw in ipairs(OPEN_KEYWORDS) do
+        if string.find(action, kw, 1, true) or string.find(object, kw, 1, true) then return true end
+    end
+    return false
+end
+
+local function TryAutoOpen()
+    if not _G.AutoOpenContainers then return end
+    local hrp = GetLocalHRP()
+    if not hrp then return end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if (obj:IsA("Model") or obj:IsA("BasePart")) and IsContainerName(obj.Name) then
+            local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if prompt and IsOpenPrompt(prompt) then
+                local pos = GetWorldPos(obj)
+                if pos and (hrp.Position - pos).Magnitude <= _G.ContainerRange then
+                    local now = os.clock()
+                    if not openDebounce[obj] or now - openDebounce[obj] > 1 then
+                        openDebounce[obj] = now
+                        pcall(function() fireproximityprompt(prompt) end)
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function TryAutoCollect()
+    if not _G.AutoCollectItems then return end
+    local hrp = GetLocalHRP()
+    if not hrp then return end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("Tool") and not IsHeldByLocal(obj) then
+            local pos = GetWorldPos(obj)
+            if pos and (hrp.Position - pos).Magnitude <= _G.CollectRange then
+                local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+                if prompt then
+                    pcall(function() fireproximityprompt(prompt) end)
+                end
+            end
+        end
+    end
+end
+
+-- =============================================================================
 -- CACHES
 -- =============================================================================
 
@@ -578,11 +742,9 @@ local function AddEspObject(cache, obj, color, labelText, boxSize, transparency,
     local identity = GetIdentity(obj)
     if cache[identity] then return end
     if CacheCount(cache) >= MAX_ESP_OBJECTS then return end
-
     local pos = GetWorldPos(identity) or GetWorldPos(obj)
     if not pos then return end
     if not WithinEspRange(pos) then return end
-
     local data = {}
     if useHighlight then
         data.highlight = CreateDoorHighlight(identity, identity, color)
@@ -699,9 +861,7 @@ task.spawn(function()
             local endIdx = math.min(scanIndex + SCAN_CHUNK - 1, #scanList)
             for i = scanIndex, endIdx do
                 local obj = scanList[i]
-                if obj and obj.Parent then
-                    pcall(ProcessOneObject, obj)
-                end
+                if obj and obj.Parent then pcall(ProcessOneObject, obj) end
             end
             scanIndex = endIdx + 1
             if scanIndex > #scanList then scanIndex = 1 end
@@ -728,6 +888,10 @@ task.spawn(function()
                 if data.label then data.label.Enabled = show and true or false end
             end
         end
+
+        pcall(RunAutoHide)
+        pcall(TryAutoOpen)
+        pcall(TryAutoCollect)
     end
 end)
 
@@ -785,6 +949,14 @@ AddInputComponent(P_Combat, "Camera FOV:", "70", function(val)
     workspace.CurrentCamera.FieldOfView = val
 end)
 
+-- AUTOMATION PANEL
+AddToggleComponent(P_Automation, "Auto-Hide (Rush/Ambush)", "AutoHide")
+AddInputComponent(P_Automation, "Auto-Hide Range:", "80", function(val) _G.AutoHideRange = val end)
+AddToggleComponent(P_Automation, "Auto-Open Containers", "AutoOpenContainers")
+AddInputComponent(P_Automation, "Container Range:", "30", function(val) _G.ContainerRange = val end)
+AddToggleComponent(P_Automation, "Auto-Collect Items", "AutoCollectItems")
+AddInputComponent(P_Automation, "Collect Range:", "15", function(val) _G.CollectRange = val end)
+
 local GridContainer = Instance.new("Frame")
 GridContainer.Size = UDim2.new(1, 0, 0, 50); GridContainer.BackgroundTransparency = 1; GridContainer.Parent = P_Settings
 local grid = Instance.new("UIGridLayout"); grid.CellSize = UDim2.new(0.48, 0, 0, 22); grid.CellPadding = UDim2.new(0, 4, 0, 4); grid.Parent = GridContainer
@@ -797,7 +969,7 @@ for name, hex in pairs(Presets) do
 end
 
 -- =============================================================================
--- RUNTIME (SPEED CAP 20 + VELOCITY ASSIST)
+-- RUNTIME (SPEED CAP 20 — NO RUBBERBAND)
 -- =============================================================================
 
 function StartCheatEngineLoops()
@@ -813,23 +985,8 @@ function StartCheatEngineLoops()
     RunService.Heartbeat:Connect(function()
         if LocalPlayer.Character then
             local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-            local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
             if humanoid then
-                local target = _G.SpeedValue
-                if target <= 20 then
-                    humanoid.WalkSpeed = target
-                else
-                    humanoid.WalkSpeed = 20
-                    if hrp and humanoid.MoveDirection.Magnitude > 0 then
-                        local extra = target - 20
-                        local assist = humanoid.MoveDirection * extra * 0.5
-                        hrp.AssemblyLinearVelocity = Vector3.new(
-                            assist.X,
-                            hrp.AssemblyLinearVelocity.Y,
-                            assist.Z
-                        )
-                    end
-                end
+                humanoid.WalkSpeed = math.min(_G.SpeedValue, 20)
                 if humanoid.UseJumpPower then
                     humanoid.JumpPower = _G.JumpValue
                 else
