@@ -11,7 +11,7 @@ for _, obj in pairs(workspace:GetDescendants()) do
         obj.Name == "DeltaBoxEsp" or obj.Name == "DeltaItemEsp" or
         obj.Name == "DeltaEntityEsp" or obj.Name == "DeltaKeyEsp" or
         obj.Name == "DeltaBookEsp" or obj.Name == "DeltaMechEsp" or
-        obj.Name == "DeltaBreakerEsp"
+        obj.Name == "DeltaBreakerEsp" or obj.Name == "DeltaInteractEsp"
     ) then obj:Destroy() end
     if obj:IsA("Highlight") and obj.Name == "DeltaDoorEsp" then obj:Destroy() end
     if obj:IsA("BillboardGui") and obj.Name == "DeltaEspLabel" then obj:Destroy() end
@@ -49,6 +49,9 @@ _G.DoorEsp = false
 _G.EntityEsp = false
 _G.EntityEspNamed = false
 _G.EntityAlert = false
+_G.InteractablesEsp = false
+_G.ScannerEsp = false
+_G.ScannerNames = {}
 
 local LightBackup = {
     Ambient = Lighting.Ambient,
@@ -112,7 +115,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -20, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DELTA MASTER v5.5.0"
+Title.Text = "DELTA MASTER v5.6.1"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 13
 Title.Font = Enum.Font.GothamBold
@@ -136,8 +139,10 @@ local function CreatePageFrame()
     f.Size = UDim2.new(1, 0, 1, 0)
     f.BackgroundTransparency = 1
     f.Visible = false
-    f.ScrollBarThickness = 0
-    f.CanvasSize = UDim2.new(0, 0, 0, 560)
+    f.ScrollBarThickness = 4
+    f.ScrollBarImageColor3 = CurrentThemeColor
+    f.CanvasSize = UDim2.new(0, 0, 0, 0)
+    f.AutomaticCanvasSize = Enum.AutomaticSize.Y
     f.Parent = Container
     local layout = Instance.new("UIListLayout")
     layout.Padding = UDim.new(0, 8)
@@ -148,6 +153,7 @@ end
 
 local P_Movement = CreatePageFrame()
 local P_Combat = CreatePageFrame()
+local P_Scanner = CreatePageFrame()
 local P_Settings = CreatePageFrame()
 
 local function SetupTabLink(btnName, targetPage, yPos)
@@ -162,7 +168,7 @@ local function SetupTabLink(btnName, targetPage, yPos)
     btn.Parent = TabBar
     local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 6); c.Parent = btn
     btn.MouseButton1Click:Connect(function()
-        P_Movement.Visible = false; P_Combat.Visible = false; P_Settings.Visible = false
+        P_Movement.Visible = false; P_Combat.Visible = false; P_Scanner.Visible = false; P_Settings.Visible = false
         targetPage.Visible = true
     end)
     return btn
@@ -170,7 +176,8 @@ end
 
 SetupTabLink("Movement", P_Movement, 8)
 SetupTabLink("Visuals/ESP", P_Combat, 33)
-SetupTabLink("Settings", P_Settings, 58)
+SetupTabLink("Scanner", P_Scanner, 58)
+SetupTabLink("Settings", P_Settings, 83)
 
 P_Movement.Visible = true
 
@@ -335,10 +342,17 @@ end
 
 local function GetAdornee(obj)
     if obj:IsA("BasePart") then return obj end
-    if obj:IsA("Model") then
-        return obj.PrimaryPart or obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChildWhichIsA("BasePart")
+    if obj:IsA("Tool") then
+        return obj:FindFirstChildWhichIsA("BasePart") or obj:FindFirstChildWhichIsA("MeshPart")
     end
-    if obj:IsA("Tool") then return obj:FindFirstChildWhichIsA("BasePart") end
+    if obj:IsA("Model") then
+        local direct = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+        if direct then return direct end
+        local tool = obj:FindFirstChildWhichIsA("Tool")
+        if tool then
+            return tool:FindFirstChildWhichIsA("BasePart") or tool:FindFirstChildWhichIsA("MeshPart")
+        end
+    end
     return nil
 end
 
@@ -356,48 +370,47 @@ end
 
 local currentRoomModel = nil
 local currentRoomNumber = nil
+local lastRoomCheck = 0
 
 local function DetectCurrentRoom()
-    -- Fallback 1: Hint GUI text
     local pg = LocalPlayer:FindFirstChild("PlayerGui")
     if pg then
         local hint = pg:FindFirstChild("Hint")
         if hint and hint:IsA("TextLabel") then
             local num = string.match(hint.Text, "%d+")
-            if num then currentRoomNumber = tonumber(num) end
-        end
-    end
-    -- Fallback 2: NumberValue in workspace
-    if not currentRoomNumber then
-        for _, v in pairs(workspace:GetDescendants()) do
-            if v:IsA("NumberValue") and (string.find(string.lower(v.Name), "room") or string.find(string.lower(v.Name), "number")) then
-                currentRoomNumber = v.Value
-                break
+            if num then
+                local newNum = tonumber(num)
+                if newNum ~= currentRoomNumber then
+                    currentRoomNumber = newNum
+                    currentRoomModel = nil
+                end
             end
         end
     end
-    -- Find the model whose name contains the room number
-    currentRoomModel = nil
+
+    if currentRoomModel and currentRoomModel.Parent then return end
+    if os.clock() - lastRoomCheck < 2 then return end
+    lastRoomCheck = os.clock()
+
     if currentRoomNumber then
-        for _, obj in pairs(workspace:GetDescendants()) do
+        for _, obj in pairs(workspace:GetChildren()) do
             if obj:IsA("Model") and string.find(obj.Name, tostring(currentRoomNumber), 1, true) then
                 currentRoomModel = obj
                 break
             end
         end
     end
-    -- Fallback 3: nearest room model (no number needed)
+
     if not currentRoomModel then
         local hrp = GetLocalHRP()
         if hrp then
-            local bestDist = math.huge
-            local bestModel = nil
-            for _, obj in pairs(workspace:GetDescendants()) do
+            local bestDist, bestModel = math.huge, nil
+            for _, obj in pairs(workspace:GetChildren()) do
                 if obj:IsA("Model") and (string.find(string.lower(obj.Name), "room") or string.find(string.lower(obj.Name), "door")) then
                     local p = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
                     if p then
                         local d = (hrp.Position - p.Position).Magnitude
-                        if d < bestDist then bestDist = d; bestModel = obj end
+                        if d < bestDist then bestDist, bestModel = d, obj end
                     end
                 end
             end
@@ -407,9 +420,14 @@ local function DetectCurrentRoom()
 end
 
 local function InCurrentRoom(obj)
-    -- If we can't detect the room, don't scope (show everything)
     if not currentRoomModel then return true end
-    return obj:IsDescendantOf(currentRoomModel)
+    if obj:IsDescendantOf(currentRoomModel) then return true end
+    local roomPart = currentRoomModel.PrimaryPart or currentRoomModel:FindFirstChildWhichIsA("BasePart")
+    local objPart = GetAdornee(obj)
+    if roomPart and objPart then
+        if (roomPart.Position - objPart.Position).Magnitude < 30 then return true end
+    end
+    return false
 end
 
 -- =============================================================================
@@ -441,7 +459,6 @@ local function CreateEspLabel(parent, text, color, size)
     lbl.BackgroundTransparency = 1
     lbl.Text = text
     lbl.TextColor3 = color
-    lbl.TextScaled = false
     lbl.TextSize = size or 10
     lbl.Font = Enum.Font.GothamBold
     lbl.TextStrokeTransparency = 0.4
@@ -451,7 +468,6 @@ local function CreateEspLabel(parent, text, color, size)
     return billboard
 end
 
--- Highlight for doors (outline-only)
 local function CreateDoorHighlight(parent, adornee, color)
     local hl = Instance.new("Highlight")
     hl.Name = "DeltaDoorEsp"
@@ -465,7 +481,7 @@ local function CreateDoorHighlight(parent, adornee, color)
 end
 
 -- =============================================================================
--- ALERT UI (top-right, small)
+-- ALERT
 -- =============================================================================
 
 local AlertContainer = Instance.new("Frame")
@@ -536,7 +552,8 @@ local function IsKeyCandidate(obj)
     if not obj or not obj.Parent then return false end
     if IsHeldByLocal(obj) then return false end
     if not InCurrentRoom(obj) then return false end
-    if not string.find(string.lower(obj.Name), "key", 1, true) then return false end
+    local lname = string.lower(obj.Name)
+    if not (string.find(lname, "key", 1, true) or string.find(lname, "keycard", 1, true) or string.find(lname, "card", 1, true) or string.find(lname, "pass", 1, true)) then return false end
     return obj:IsA("Tool") or obj:IsA("Model") or obj:IsA("BasePart")
 end
 
@@ -567,13 +584,14 @@ end
 
 local function IsDoorCandidate(obj)
     if not obj or not obj.Parent then return false end
-    if not obj:IsA("Model") then return false end
-    if not string.find(string.lower(obj.Name), "door", 1, true) then return false end
+    if not (obj:IsA("Model") or obj:IsA("BasePart")) then return false end
+    local lname = string.lower(obj.Name)
+    if not string.find(lname, "door", 1, true) then return false end
+    if string.find(lname, "dupe", 1, true) then return false end
     if not InCurrentRoom(obj) then return false end
     return true
 end
 
--- ENTITIES: global, not room-scoped, but range-respected
 local function IsEntityCandidate(obj)
     if not obj or not obj.Parent or not obj:IsA("Model") then return false end
     if IsPlayerCharacter(obj) then return false end
@@ -583,12 +601,29 @@ local function IsEntityCandidate(obj)
     return false
 end
 
+local function IsInteractable(obj)
+    if not obj or not obj.Parent then return false end
+    if IsHeldByLocal(obj) then return false end
+    if not InCurrentRoom(obj) then return false end
+    if not (obj:IsA("Model") or obj:IsA("BasePart") or obj:IsA("Tool")) then return false end
+    if obj:IsA("Tool") then return true end
+    if obj:FindFirstChildWhichIsA("ProximityPrompt", true) then return true end
+    if obj:FindFirstChildWhichIsA("ClickDetector", true) then return true end
+    for _, v in pairs(obj:GetChildren()) do
+        if v:IsA("BoolValue") and (v.Name == "Interactable" or v.Name == "Usable" or v.Name == "CanUse") and v.Value then
+            return true
+        end
+    end
+    return false
+end
+
 -- =============================================================================
--- CACHES + REFRESH
+-- CACHES
 -- =============================================================================
 
 local ItemEspCache, EntityEspCache, KeyEspCache = {}, {}, {}
 local BookEspCache, MechEspCache, BreakerEspCache, DoorEspCache = {}, {}, {}, {}
+local InteractEspCache = {}
 
 local function CleanupCache(cache, isCandidate)
     for obj, data in pairs(cache) do
@@ -617,114 +652,239 @@ local function AddEspObject(cache, obj, color, labelText, boxSize, transparency,
     cache[obj] = data
 end
 
-local function RefreshItemEsp()
-    CleanupCache(ItemEspCache, IsItemCandidate)
-    if not _G.ItemEsp then return end
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if IsItemCandidate(obj) and not ItemEspCache[obj] then
-            local color = obj:IsA("Tool") and Color3.fromRGB(255, 200, 0) or Color3.fromRGB(0, 255, 180)
-            AddEspObject(ItemEspCache, obj, color, obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
-        end
-    end
-end
-
-local function RefreshEntityEsp()
-    CleanupCache(EntityEspCache, IsEntityCandidate)
-    if not _G.EntityEsp then return end
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if IsEntityCandidate(obj) and not EntityEspCache[obj] then
-            AddEspObject(EntityEspCache, obj, Color3.fromRGB(255, 30, 30), "⚠ " .. obj.Name, Vector3.new(7, 9, 7), 0.25, 20, false)
-        end
-    end
-end
-
-local function RefreshKeyEsp()
-    CleanupCache(KeyEspCache, IsKeyCandidate)
-    if not _G.KeyEsp then return end
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if IsKeyCandidate(obj) and not KeyEspCache[obj] then
-            AddEspObject(KeyEspCache, obj, Color3.fromRGB(255, 220, 0), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
-        end
-    end
-end
-
-local function RefreshBookEsp()
-    CleanupCache(BookEspCache, IsBookCandidate)
-    if not _G.BookEsp then return end
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if IsBookCandidate(obj) and not BookEspCache[obj] then
-            AddEspObject(BookEspCache, obj, Color3.fromRGB(0, 200, 255), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
-        end
-    end
-end
-
-local function RefreshMechEsp()
-    CleanupCache(MechEspCache, IsMechCandidate)
-    if not _G.MechEsp then return end
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if IsMechCandidate(obj) and not MechEspCache[obj] then
-            AddEspObject(MechEspCache, obj, Color3.fromRGB(255, 140, 0), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
-        end
-    end
-end
-
-local function RefreshBreakerEsp()
-    CleanupCache(BreakerEspCache, IsBreakerCandidate)
-    if not _G.BreakerEsp then return end
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if IsBreakerCandidate(obj) and not BreakerEspCache[obj] then
-            AddEspObject(BreakerEspCache, obj, Color3.fromRGB(180, 80, 255), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
-        end
-    end
-end
-
-local function RefreshDoorEsp()
-    CleanupCache(DoorEspCache, IsDoorCandidate)
-    if not _G.DoorEsp then return end
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if IsDoorCandidate(obj) and not DoorEspCache[obj] then
-            local label = obj.Name
-            local numVal = obj:FindFirstChildWhichIsA("NumberValue")
-            if numVal then label = obj.Name .. " (" .. tostring(numVal.Value) .. ")" end
-            AddEspObject(DoorEspCache, obj, Color3.fromRGB(255, 220, 0), label, nil, nil, nil, true)
-        end
-    end
-end
-
 -- Entity pulse
 task.spawn(function()
     while true do
         task.wait(0.4)
         for _, data in pairs(EntityEspCache) do
             if data.box and data.box.Parent then
-                local t = tick() % 1
-                data.box.Transparency = 0.15 + math.abs(math.sin(t * math.pi)) * 0.35
+                data.box.Transparency = 0.15 + math.abs(math.sin((tick() % 1) * math.pi)) * 0.35
             end
         end
     end
 end)
 
+-- =============================================================================
+-- SCANNER
+-- =============================================================================
+
+local ScanList = {}
+local ScanToggles = {}
+local ScannerEspCache = {}
+local lastScanDiscover = 0
+
+local function IsInterestingForScanner(obj)
+    if not obj or not obj.Parent then return false end
+    if obj:IsA("Terrain") or obj:IsA("Camera") then return false end
+    if not (obj:IsA("Model") or obj:IsA("BasePart") or obj:IsA("Tool")) then return false end
+    if string.find(obj.Name, "^Delta") then return false end
+    if obj:IsA("Tool") then return true end
+    if obj:IsA("Model") then
+        if currentRoomModel and obj == currentRoomModel then return false end
+        for _, p in ipairs(obj:GetDescendants()) do
+            if p:IsA("BasePart") and (not p.Anchored or not p.CanCollide) then return true end
+        end
+        return false
+    end
+    if obj:IsA("BasePart") then
+        if obj.Anchored and obj.CanCollide then return false end
+        return true
+    end
+    return false
+end
+
+local function DiscoverRoomNames()
+    local found = {}
+    local root = (currentRoomModel and currentRoomModel.Parent) and currentRoomModel or workspace
+    for _, obj in ipairs(root:GetDescendants()) do
+        if IsInterestingForScanner(obj) then
+            found[obj.Name] = true
+        end
+    end
+    local newList = {}
+    for name in pairs(found) do table.insert(newList, name) end
+    table.sort(newList)
+    ScanList = newList
+end
+
+local function RenderScanList()
+    for _, ui in pairs(ScanToggles) do
+        if ui and ui.Parent then ui:Destroy() end
+    end
+    ScanToggles = {}
+
+    local header = Instance.new("TextLabel")
+    header.Size = UDim2.new(1, 0, 0, 24)
+    header.BackgroundTransparency = 1
+    header.Text = "Objects in current room (" .. #ScanList .. "):"
+    header.TextColor3 = CurrentThemeColor
+    header.Font = Enum.Font.GothamBold
+    header.TextSize = 11
+    header.TextXAlignment = Enum.TextXAlignment.Left
+    header.Parent = P_Scanner
+    ScanToggles["__header"] = header
+
+    for _, name in ipairs(ScanList) do
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1, 0, 0, 30)
+        row.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+        local rc = Instance.new("UICorner"); rc.CornerRadius = UDim.new(0, 6); rc.Parent = row
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(0.7, 0, 1, 0)
+        lbl.Position = UDim2.new(0, 10, 0, 0)
+        lbl.BackgroundTransparency = 1
+        lbl.Text = name
+        lbl.TextColor3 = Color3.fromRGB(240, 240, 240)
+        lbl.Font = Enum.Font.GothamMedium
+        lbl.TextSize = 11
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+        lbl.Parent = row
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(0, 50, 0, 22)
+        btn.Position = UDim2.new(1, -60, 0, 4)
+        btn.BackgroundColor3 = _G.ScannerNames[name] and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(60, 60, 60)
+        btn.Text = _G.ScannerNames[name] and "ON" or "OFF"
+        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btn.Font = Enum.Font.GothamBold
+        btn.TextSize = 10
+        local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 4); bc.Parent = btn
+        btn.MouseButton1Click:Connect(function()
+            _G.ScannerNames[name] = not _G.ScannerNames[name]
+            btn.Text = _G.ScannerNames[name] and "ON" or "OFF"
+            btn.BackgroundColor3 = _G.ScannerNames[name] and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(60, 60, 60)
+        end)
+        row.Parent = P_Scanner
+        ScanToggles[name] = row
+    end
+end
+
+local function RefreshScannerEsp()
+    for obj, data in pairs(ScannerEspCache) do
+        if not obj or not obj.Parent then
+            if data.box and data.box.Parent then data.box:Destroy() end
+            if data.label and data.label.Parent then data.label:Destroy() end
+            ScannerEspCache[obj] = nil
+        else
+            local pos = GetWorldPos(obj)
+            local show = _G.ScannerNames[obj.Name] and pos and WithinEspRange(pos)
+            if data.box then data.box.Visible = show and true or false end
+            if data.label then data.label.Enabled = show and true or false end
+        end
+    end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if (obj:IsA("Model") or obj:IsA("BasePart") or obj:IsA("Tool"))
+            and _G.ScannerNames[obj.Name]
+            and not ScannerEspCache[obj] then
+            local pos = GetWorldPos(obj)
+            if pos and WithinEspRange(pos) then
+                local adornee = GetAdornee(obj)
+                if adornee then
+                    local box = CreateEspBox(obj, adornee, CurrentThemeColor, "DeltaEspBox", Vector3.new(3, 3, 3), 0.5, 8)
+                    local label = CreateEspLabel(obj, obj.Name, CurrentThemeColor, 9)
+                    ScannerEspCache[obj] = {box = box, label = label}
+                end
+            end
+        end
+    end
+end
+
+-- =============================================================================
+-- SINGLE SCAN LOOP
+-- =============================================================================
+
 task.spawn(function()
     while true do
-        task.wait(0.5)
+        task.wait(0.75)
         DetectCurrentRoom()
-        pcall(RefreshItemEsp)
-        pcall(RefreshEntityEsp)
-        pcall(RefreshKeyEsp)
-        pcall(RefreshBookEsp)
-        pcall(RefreshMechEsp)
-        pcall(RefreshBreakerEsp)
-        pcall(RefreshDoorEsp)
+        local all = workspace:GetDescendants()
+
+        if _G.InteractablesEsp then
+            for _, obj in ipairs(all) do
+                if not InteractEspCache[obj] and IsInteractable(obj) then
+                    AddEspObject(InteractEspCache, obj, CurrentThemeColor, obj.Name, Vector3.new(3, 3, 3), 0.4, 15, false)
+                end
+            end
+        end
+        if _G.ItemEsp then
+            for _, obj in ipairs(all) do
+                if not ItemEspCache[obj] and IsItemCandidate(obj) then
+                    local c = obj:IsA("Tool") and Color3.fromRGB(255, 200, 0) or Color3.fromRGB(0, 255, 180)
+                    AddEspObject(ItemEspCache, obj, c, obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
+                end
+            end
+        end
+        if _G.KeyEsp then
+            for _, obj in ipairs(all) do
+                if not KeyEspCache[obj] and IsKeyCandidate(obj) then
+                    AddEspObject(KeyEspCache, obj, Color3.fromRGB(255, 220, 0), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
+                end
+            end
+        end
+        if _G.BookEsp then
+            for _, obj in ipairs(all) do
+                if not BookEspCache[obj] and IsBookCandidate(obj) then
+                    AddEspObject(BookEspCache, obj, Color3.fromRGB(0, 200, 255), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
+                end
+            end
+        end
+        if _G.MechEsp then
+            for _, obj in ipairs(all) do
+                if not MechEspCache[obj] and IsMechCandidate(obj) then
+                    AddEspObject(MechEspCache, obj, Color3.fromRGB(255, 140, 0), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
+                end
+            end
+        end
+        if _G.BreakerEsp then
+            for _, obj in ipairs(all) do
+                if not BreakerEspCache[obj] and IsBreakerCandidate(obj) then
+                    AddEspObject(BreakerEspCache, obj, Color3.fromRGB(180, 80, 255), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
+                end
+            end
+        end
+        if _G.DoorEsp then
+            for _, obj in ipairs(all) do
+                if not DoorEspCache[obj] and IsDoorCandidate(obj) then
+                    local label = obj.Name
+                    local nv = obj:FindFirstChildWhichIsA("NumberValue")
+                    if nv then label = obj.Name .. " (" .. tostring(nv.Value) .. ")" end
+                    AddEspObject(DoorEspCache, obj, Color3.fromRGB(255, 220, 0), label, nil, nil, nil, true)
+                end
+            end
+        end
+        if _G.EntityEsp then
+            for _, obj in ipairs(all) do
+                if not EntityEspCache[obj] and IsEntityCandidate(obj) then
+                    AddEspObject(EntityEspCache, obj, Color3.fromRGB(255, 30, 30), "⚠ " .. obj.Name, Vector3.new(7, 9, 7), 0.25, 20, false)
+                end
+            end
+        end
+
+        CleanupCache(ItemEspCache, IsItemCandidate)
+        CleanupCache(KeyEspCache, IsKeyCandidate)
+        CleanupCache(BookEspCache, IsBookCandidate)
+        CleanupCache(MechEspCache, IsMechCandidate)
+        CleanupCache(BreakerEspCache, IsBreakerCandidate)
+        CleanupCache(DoorEspCache, IsDoorCandidate)
+        CleanupCache(EntityEspCache, IsEntityCandidate)
+        CleanupCache(InteractEspCache, IsInteractable)
+
+        if os.clock() - lastScanDiscover > 1.5 then
+            lastScanDiscover = os.clock()
+            DiscoverRoomNames()
+            RenderScanList()
+        end
+        pcall(RefreshScannerEsp)
     end
 end)
 
 -- =============================================================================
--- VISUALS / ESP PANEL
+-- PANELS
 -- =============================================================================
 
 AddToggleComponent(P_Combat, "Box ESP (Players)", "BoxEsp")
 AddToggleComponent(P_Combat, "ESP Team Colors", "EspTeamColor")
 AddInputComponent(P_Combat, "ESP Range (studs):", "300", function(val) _G.EspRange = val end)
+AddToggleComponent(P_Combat, "Interactables ESP", "InteractablesEsp")
 AddToggleComponent(P_Combat, "Item ESP", "ItemEsp")
 AddToggleComponent(P_Combat, "Item ESP - Tools Only", "ItemEspToolsOnly")
 AddToggleComponent(P_Combat, "Key ESP", "KeyEsp")
@@ -761,11 +921,9 @@ AddInputComponent(P_Combat, "Camera FOV:", "70", function(val)
     workspace.CurrentCamera.FieldOfView = val
 end)
 
--- SETTINGS
 local GridContainer = Instance.new("Frame")
 GridContainer.Size = UDim2.new(1, 0, 0, 50); GridContainer.BackgroundTransparency = 1; GridContainer.Parent = P_Settings
 local grid = Instance.new("UIGridLayout"); grid.CellSize = UDim2.new(0.48, 0, 0, 22); grid.CellPadding = UDim2.new(0, 4, 0, 4); grid.Parent = GridContainer
-
 for name, hex in pairs(Presets) do
     local p = Instance.new("TextButton")
     p.BackgroundColor3 = Color3.fromHex(hex); p.Text = name; p.TextColor3 = Color3.fromRGB(20, 20, 20); p.Font = Enum.Font.GothamBold; p.TextSize = 9
