@@ -1,5 +1,5 @@
 -- =============================================================================
--- DELTA MASTER v5.6.7 — RUSH-READY, WALKSPEED-ONLY
+-- DELTA MASTER v5.6.8 — SPEED CAP 20 + VELOCITY ASSIST
 -- =============================================================================
 
 if game.CoreGui:FindFirstChild("DeltaCheatMenuV5") then
@@ -109,7 +109,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -20, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DELTA MASTER v5.6.7"
+Title.Text = "DELTA MASTER v5.6.8"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 13
 Title.Font = Enum.Font.GothamBold
@@ -521,12 +521,10 @@ local function IsDoorCandidate(obj)
     return true
 end
 
--- BROADENED: catches Rush whether Model, BasePart, or MeshPart
 local function IsEntityCandidate(obj)
     if not obj or not obj.Parent then return false end
     if not (obj:IsA("Model") or obj:IsA("BasePart") or obj:IsA("MeshPart")) then return false end
     if IsPlayerCharacter(obj) then return false end
-
     if obj:IsA("Model") then
         local hum = obj:FindFirstChildOfClass("Humanoid")
         if hum and hum.Health > 0 then return true end
@@ -598,7 +596,7 @@ local function AddEspObject(cache, obj, color, labelText, boxSize, transparency,
 end
 
 -- =============================================================================
--- ENTITY INSTANT DETECTION (Rush fix)
+-- ENTITY INSTANT DETECTION
 -- =============================================================================
 
 local function TryEntityEspNow(obj)
@@ -612,7 +610,6 @@ local function TryEntityEspNow(obj)
 end
 
 workspace.DescendantAdded:Connect(function(child)
-    -- Alert
     if _G.EntityAlert and (child:IsA("Model") or child:IsA("BasePart")) then
         local kw = MatchesKeyword(child.Name, ENTITY_KEYWORDS)
         if kw then
@@ -623,7 +620,6 @@ workspace.DescendantAdded:Connect(function(child)
             end
         end
     end
-    -- Instant ESP (Rush dies before next scan otherwise)
     if _G.EntityEsp then
         TryEntityEspNow(child)
         task.delay(0.1, function() TryEntityEspNow(child) end)
@@ -735,7 +731,6 @@ task.spawn(function()
     end
 end)
 
--- Entity pulse
 task.spawn(function()
     while true do
         task.wait(0.4)
@@ -802,7 +797,7 @@ for name, hex in pairs(Presets) do
 end
 
 -- =============================================================================
--- RUNTIME (WALKSPEED ONLY)
+-- RUNTIME (SPEED CAP 20 + VELOCITY ASSIST)
 -- =============================================================================
 
 function StartCheatEngineLoops()
@@ -818,8 +813,23 @@ function StartCheatEngineLoops()
     RunService.Heartbeat:Connect(function()
         if LocalPlayer.Character then
             local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
             if humanoid then
-                humanoid.WalkSpeed = _G.SpeedValue
+                local target = _G.SpeedValue
+                if target <= 20 then
+                    humanoid.WalkSpeed = target
+                else
+                    humanoid.WalkSpeed = 20
+                    if hrp and humanoid.MoveDirection.Magnitude > 0 then
+                        local extra = target - 20
+                        local assist = humanoid.MoveDirection * extra * 0.5
+                        hrp.AssemblyLinearVelocity = Vector3.new(
+                            assist.X,
+                            hrp.AssemblyLinearVelocity.Y,
+                            assist.Z
+                        )
+                    end
+                end
                 if humanoid.UseJumpPower then
                     humanoid.JumpPower = _G.JumpValue
                 else
@@ -828,7 +838,10 @@ function StartCheatEngineLoops()
             end
         end
         if _G.Fullbright then
-            Lighting.Ambient = Color3.fromRGB(255, 255, 255); Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255); Lighting.Brightness = 2; Lighting.GlobalShadows = false
+            Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+            Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+            Lighting.Brightness = 2
+            Lighting.GlobalShadows = false
         end
     end)
 
