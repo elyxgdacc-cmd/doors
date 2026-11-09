@@ -2,23 +2,21 @@
 -- PART 1: CORE FRAMEWORK, ENGINE LAYERS, & INTERFACE CONFIGURATION
 -- =============================================================================
 
--- Destroy existing UI if re-running
 if game.CoreGui:FindFirstChild("DeltaCheatMenuV5") then
     game.CoreGui.DeltaCheatMenuV5:Destroy()
 end
 
--- Clean up leftover ESP adornments from a previous run
 for _, obj in pairs(workspace:GetDescendants()) do
     if obj:IsA("BoxHandleAdornment") and (
-        obj.Name == "DeltaBoxEsp" or
-        obj.Name == "DeltaItemEsp" or
-        obj.Name == "DeltaEntityEsp"
-    ) then
-        obj:Destroy()
-    end
+        obj.Name == "DeltaBoxEsp" or obj.Name == "DeltaItemEsp" or
+        obj.Name == "DeltaEntityEsp" or obj.Name == "DeltaKeyEsp" or
+        obj.Name == "DeltaBookEsp" or obj.Name == "DeltaMechEsp" or
+        obj.Name == "DeltaBreakerEsp"
+    ) then obj:Destroy() end
+    if obj:IsA("Highlight") and obj.Name == "DeltaDoorEsp" then obj:Destroy() end
+    if obj:IsA("BillboardGui") and obj.Name == "DeltaEspLabel" then obj:Destroy() end
 end
 
--- Core Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -27,7 +25,6 @@ local TweenService = game:GetService("TweenService")
 local VirtualUser = game:GetService("VirtualUser")
 local LocalPlayer = Players.LocalPlayer
 
--- Global Environment Value Safeguards
 local _G = getgenv and getgenv() or _G
 _G.SpeedValue = 16
 _G.JumpValue = 50
@@ -39,17 +36,20 @@ _G.Fullbright = false
 _G.Nametags = false
 _G.AntiAfk = true
 
--- ESP state
 _G.BoxEsp = false
 _G.EspTeamColor = false
 _G.EspRange = 300
 _G.ItemEsp = false
 _G.ItemEspToolsOnly = false
+_G.KeyEsp = false
+_G.BookEsp = false
+_G.MechEsp = false
+_G.BreakerEsp = false
+_G.DoorEsp = false
 _G.EntityEsp = false
 _G.EntityEspNamed = false
 _G.EntityAlert = false
 
--- Backup Initial Lighting Environments
 local LightBackup = {
     Ambient = Lighting.Ambient,
     OutdoorAmbient = Lighting.OutdoorAmbient,
@@ -67,13 +67,15 @@ local Presets = {
     ["Hot Pink"] = "#FF00AA"
 }
 
--- Initialize Root Interface Layers
+-- =============================================================================
+-- PART 2: UI
+-- =============================================================================
+
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "DeltaCheatMenuV5"
 ScreenGui.Parent = game.CoreGui
 ScreenGui.ResetOnSpawn = false
 
--- Compact Floating Access Target
 local MinimizeBtn = Instance.new("TextButton")
 MinimizeBtn.Name = "MinimizeBtn"
 MinimizeBtn.Parent = ScreenGui
@@ -86,21 +88,9 @@ MinimizeBtn.TextSize = 12
 MinimizeBtn.Font = Enum.Font.GothamBold
 MinimizeBtn.Active = true
 MinimizeBtn.Visible = false
+local MinCorner = Instance.new("UICorner"); MinCorner.CornerRadius = UDim.new(0, 6); MinCorner.Parent = MinimizeBtn
+local MinStroke = Instance.new("UIStroke"); MinStroke.Color = CurrentThemeColor; MinStroke.Thickness = 2; MinStroke.Parent = MinimizeBtn
 
-local MinCorner = Instance.new("UICorner")
-MinCorner.CornerRadius = UDim.new(0, 6)
-MinCorner.Parent = MinimizeBtn
-
-local MinStroke = Instance.new("UIStroke")
-MinStroke.Color = CurrentThemeColor
-MinStroke.Thickness = 2
-MinStroke.Parent = MinimizeBtn
-
--- =============================================================================
--- PART 2: UI LAYOUT BUILDER & PAGINATION HUB
--- =============================================================================
-
--- Main Master Panel Board
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
 MainFrame.Parent = ScreenGui
@@ -109,38 +99,26 @@ MainFrame.Position = UDim2.new(0.2, 0, 0.2, 0)
 MainFrame.Size = UDim2.new(0, 380, 0, 320)
 MainFrame.Active = true
 MainFrame.Visible = false
+local MainCorner = Instance.new("UICorner"); MainCorner.CornerRadius = UDim.new(0, 12); MainCorner.Parent = MainFrame
+local MainStroke = Instance.new("UIStroke"); MainStroke.Color = CurrentThemeColor; MainStroke.Thickness = 2; MainStroke.Parent = MainFrame
 
-local MainCorner = Instance.new("UICorner")
-MainCorner.CornerRadius = UDim.new(0, 12)
-MainCorner.Parent = MainFrame
-
-local MainStroke = Instance.new("UIStroke")
-MainStroke.Color = CurrentThemeColor
-MainStroke.Thickness = 2
-MainStroke.Parent = MainFrame
-
--- Panel Header Setup
 local Header = Instance.new("Frame")
 Header.Size = UDim2.new(1, 0, 0, 40)
 Header.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
 Header.Parent = MainFrame
-
-local HeaderCorner = Instance.new("UICorner")
-HeaderCorner.CornerRadius = UDim.new(0, 12)
-HeaderCorner.Parent = Header
+local HeaderCorner = Instance.new("UICorner"); HeaderCorner.CornerRadius = UDim.new(0, 12); HeaderCorner.Parent = Header
 
 local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -20, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DELTA MASTER v5.3.0"
+Title.Text = "DELTA MASTER v5.5.0"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 13
 Title.Font = Enum.Font.GothamBold
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Parent = Header
 
--- Left Tab Sidebar Hub
 local TabBar = Instance.new("Frame")
 TabBar.Position = UDim2.new(0, 0, 0, 40)
 TabBar.Size = UDim2.new(0, 100, 1, -40)
@@ -153,7 +131,6 @@ Container.Size = UDim2.new(1, -120, 1, -60)
 Container.BackgroundTransparency = 1
 Container.Parent = MainFrame
 
--- Scrolling Canvas Factory Function
 local function CreatePageFrame()
     local f = Instance.new("ScrollingFrame")
     f.Size = UDim2.new(1, 0, 1, 0)
@@ -162,7 +139,6 @@ local function CreatePageFrame()
     f.ScrollBarThickness = 0
     f.CanvasSize = UDim2.new(0, 0, 0, 560)
     f.Parent = Container
-
     local layout = Instance.new("UIListLayout")
     layout.Padding = UDim.new(0, 8)
     layout.SortOrder = Enum.SortOrder.LayoutOrder
@@ -174,7 +150,6 @@ local P_Movement = CreatePageFrame()
 local P_Combat = CreatePageFrame()
 local P_Settings = CreatePageFrame()
 
--- Tab Navigation Assembler Links
 local function SetupTabLink(btnName, targetPage, yPos)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(1, -10, 0, 22)
@@ -185,11 +160,7 @@ local function SetupTabLink(btnName, targetPage, yPos)
     btn.Font = Enum.Font.GothamMedium
     btn.TextSize = 9
     btn.Parent = TabBar
-
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 6)
-    c.Parent = btn
-
+    local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 6); c.Parent = btn
     btn.MouseButton1Click:Connect(function()
         P_Movement.Visible = false; P_Combat.Visible = false; P_Settings.Visible = false
         targetPage.Visible = true
@@ -208,15 +179,11 @@ local function ApplyNewThemeColor(hexColor)
     MainStroke.Color = hexColor; MinStroke.Color = hexColor; MinimizeBtn.TextColor3 = hexColor
 end
 
--- Interactive Toggle Generator Component
 local function AddToggleComponent(targetPage, labelText, varName, callback)
     local item = Instance.new("Frame")
     item.Size = UDim2.new(1, 0, 0, 35)
     item.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 6)
-    c.Parent = item
-
+    local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 6); c.Parent = item
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(0.6, 0, 1, 0)
     lbl.Position = UDim2.new(0, 10, 0, 0)
@@ -227,7 +194,6 @@ local function AddToggleComponent(targetPage, labelText, varName, callback)
     lbl.TextSize = 12
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Parent = item
-
     local action = Instance.new("TextButton")
     action.Size = UDim2.new(0, 50, 0, 22)
     action.Position = UDim2.new(1, -60, 0, 6)
@@ -237,10 +203,7 @@ local function AddToggleComponent(targetPage, labelText, varName, callback)
     action.Font = Enum.Font.GothamBold
     action.TextSize = 10
     action.Parent = item
-    local acCorner = Instance.new("UICorner")
-    acCorner.CornerRadius = UDim.new(0, 4)
-    acCorner.Parent = action
-
+    local acCorner = Instance.new("UICorner"); acCorner.CornerRadius = UDim.new(0, 4); acCorner.Parent = action
     action.MouseButton1Click:Connect(function()
         _G[varName] = not _G[varName]
         action.Text = _G[varName] and "ON" or "OFF"
@@ -250,14 +213,11 @@ local function AddToggleComponent(targetPage, labelText, varName, callback)
     item.Parent = targetPage
 end
 
--- Numerical Input Field Assembly Component
 local function AddInputComponent(targetPage, labelText, defaultText, callback)
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(1, 0, 0, 40)
     frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-    local sc = Instance.new("UICorner")
-    sc.CornerRadius = UDim.new(0, 6)
-    sc.Parent = frame
+    local sc = Instance.new("UICorner"); sc.CornerRadius = UDim.new(0, 6); sc.Parent = frame
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(0.5, 0, 1, 0)
     lbl.Position = UDim2.new(0, 10, 0, 0)
@@ -277,9 +237,7 @@ local function AddInputComponent(targetPage, labelText, defaultText, callback)
     box.Font = Enum.Font.GothamBold
     box.TextSize = 12
     box.Parent = frame
-    local sbc = Instance.new("UICorner")
-    sbc.CornerRadius = UDim.new(0, 4)
-    sbc.Parent = box
+    local sbc = Instance.new("UICorner"); sbc.CornerRadius = UDim.new(0, 4); sbc.Parent = box
     box.FocusLost:Connect(function()
         local val = tonumber(box.Text)
         if val then callback(val) else box.Text = defaultText end
@@ -287,7 +245,6 @@ local function AddInputComponent(targetPage, labelText, defaultText, callback)
     frame.Parent = targetPage
 end
 
--- Mobile Panel Drag Hook
 local function EnableDragModule(targetUi)
     local dragToggle = false
     local dragStart, startPos
@@ -311,7 +268,6 @@ EnableDragModule(MainFrame)
 EnableDragModule(MinimizeBtn)
 MinimizeBtn.MouseButton1Click:Connect(function() MainFrame.Visible = not MainFrame.Visible end)
 
--- MOVEMENT PANEL POPULATION
 AddToggleComponent(P_Movement, "Infinite Jump", "InfJump")
 AddToggleComponent(P_Movement, "Noclip Engine", "Noclip")
 AddInputComponent(P_Movement, "Speed Value:", "16", function(val) _G.SpeedValue = val end)
@@ -322,7 +278,6 @@ AddInputComponent(P_Movement, "Gravity Mod:", "196", function(val) _G.GravityVal
 -- PART 3: VISUALS / ESP
 -- =============================================================================
 
--- Entity keyword list (Doors-aware)
 local ENTITY_KEYWORDS = {
     "rush", "ambush", "seek", "figure", "halt", "glitch",
     "screech", "timothy", "jack", "hide", "eyes", "window",
@@ -332,14 +287,17 @@ local ENTITY_KEYWORDS = {
     "rooms", "backrooms", "hq",
     "entity", "monster", "enemy", "boss",
 }
+local MECHANISM_KEYWORDS = { "anchor", "generator", "lever", "circuit", "breaker" }
 
-local function MatchesEntityKeyword(name)
+local function MatchesKeyword(name, list)
     local lname = string.lower(name)
-    for _, kw in ipairs(ENTITY_KEYWORDS) do
+    for _, kw in ipairs(list) do
         if string.find(lname, kw, 1, true) then return kw end
     end
     return nil
 end
+local function MatchesEntityKeyword(name) return MatchesKeyword(name, ENTITY_KEYWORDS) end
+local function MatchesMechanismKeyword(name) return MatchesKeyword(name, MECHANISM_KEYWORDS) end
 
 local function GetLocalHRP()
     if LocalPlayer.Character then
@@ -380,87 +338,168 @@ local function GetAdornee(obj)
     if obj:IsA("Model") then
         return obj.PrimaryPart or obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChildWhichIsA("BasePart")
     end
-    if obj:IsA("Tool") then
-        return obj:FindFirstChildWhichIsA("BasePart")
-    end
+    if obj:IsA("Tool") then return obj:FindFirstChildWhichIsA("BasePart") end
     return nil
 end
 
-local function IsItemCandidate(obj)
-    if not obj or not obj.Parent then return false end
-    if _G.ItemEspToolsOnly then return obj:IsA("Tool") end
-    if obj:IsA("Tool") then return true end
-    if obj:IsA("BasePart") and obj.Parent == workspace and not obj.Anchored and not obj.CanCollide then
-        return true
+local function IsHeldByLocal(obj)
+    if not LocalPlayer.Character then return false end
+    if obj:IsDescendantOf(LocalPlayer.Character) then return true end
+    local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+    if backpack and obj:IsDescendantOf(backpack) then return true end
+    return false
+end
+
+-- =============================================================================
+-- CURRENT ROOM DETECTION
+-- =============================================================================
+
+local currentRoomModel = nil
+local currentRoomNumber = nil
+
+local function DetectCurrentRoom()
+    -- Fallback 1: Hint GUI text
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    if pg then
+        local hint = pg:FindFirstChild("Hint")
+        if hint and hint:IsA("TextLabel") then
+            local num = string.match(hint.Text, "%d+")
+            if num then currentRoomNumber = tonumber(num) end
+        end
     end
-    return false
+    -- Fallback 2: NumberValue in workspace
+    if not currentRoomNumber then
+        for _, v in pairs(workspace:GetDescendants()) do
+            if v:IsA("NumberValue") and (string.find(string.lower(v.Name), "room") or string.find(string.lower(v.Name), "number")) then
+                currentRoomNumber = v.Value
+                break
+            end
+        end
+    end
+    -- Find the model whose name contains the room number
+    currentRoomModel = nil
+    if currentRoomNumber then
+        for _, obj in pairs(workspace:GetDescendants()) do
+            if obj:IsA("Model") and string.find(obj.Name, tostring(currentRoomNumber), 1, true) then
+                currentRoomModel = obj
+                break
+            end
+        end
+    end
+    -- Fallback 3: nearest room model (no number needed)
+    if not currentRoomModel then
+        local hrp = GetLocalHRP()
+        if hrp then
+            local bestDist = math.huge
+            local bestModel = nil
+            for _, obj in pairs(workspace:GetDescendants()) do
+                if obj:IsA("Model") and (string.find(string.lower(obj.Name), "room") or string.find(string.lower(obj.Name), "door")) then
+                    local p = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+                    if p then
+                        local d = (hrp.Position - p.Position).Magnitude
+                        if d < bestDist then bestDist = d; bestModel = obj end
+                    end
+                end
+            end
+            if bestModel and bestDist < 150 then currentRoomModel = bestModel end
+        end
+    end
 end
 
-local function IsEntityCandidate(obj)
-    if not obj or not obj.Parent or not obj:IsA("Model") then return false end
-    if IsPlayerCharacter(obj) then return false end
-    local hum = obj:FindFirstChildOfClass("Humanoid")
-    if hum and hum.Health > 0 then return true end
-    if _G.EntityEspNamed and MatchesEntityKeyword(obj.Name) then return true end
-    return false
+local function InCurrentRoom(obj)
+    -- If we can't detect the room, don't scope (show everything)
+    if not currentRoomModel then return true end
+    return obj:IsDescendantOf(currentRoomModel)
 end
 
-local function CreateEspBox(parent, adornee, color, name)
+-- =============================================================================
+-- VISUAL BUILDERS
+-- =============================================================================
+
+local function CreateEspBox(parent, adornee, color, name, size, transparency, zindex)
     local box = Instance.new("BoxHandleAdornment")
     box.Name = name
     box.Adornee = adornee
-    box.Size = Vector3.new(4, 6, 4)
+    box.Size = size or Vector3.new(4, 6, 4)
     box.AlwaysOnTop = true
-    box.ZIndex = 9
-    box.Transparency = 0.6
+    box.ZIndex = zindex or 9
+    box.Transparency = transparency or 0.6
     box.Color3 = color
     box.Parent = parent
     return box
 end
 
--- Alert UI
+local function CreateEspLabel(parent, text, color, size)
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "DeltaEspLabel"
+    billboard.AlwaysOnTop = true
+    billboard.Size = UDim2.new(0, 100, 0, 20)
+    billboard.StudsOffset = Vector3.new(0, 2, 0)
+    billboard.LightInfluence = 0
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 1, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.TextColor3 = color
+    lbl.TextScaled = false
+    lbl.TextSize = size or 10
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextStrokeTransparency = 0.4
+    lbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    lbl.Parent = billboard
+    billboard.Parent = parent
+    return billboard
+end
+
+-- Highlight for doors (outline-only)
+local function CreateDoorHighlight(parent, adornee, color)
+    local hl = Instance.new("Highlight")
+    hl.Name = "DeltaDoorEsp"
+    hl.Adornee = adornee
+    hl.FillTransparency = 1
+    hl.OutlineTransparency = 0
+    hl.OutlineColor = color
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Parent = parent
+    return hl
+end
+
+-- =============================================================================
+-- ALERT UI (top-right, small)
+-- =============================================================================
+
 local AlertContainer = Instance.new("Frame")
 AlertContainer.Name = "DeltaAlertContainer"
 AlertContainer.Parent = ScreenGui
-AlertContainer.Position = UDim2.new(0.5, -150, 0, 80)
-AlertContainer.Size = UDim2.new(0, 300, 0, 0)
+AlertContainer.Position = UDim2.new(1, -190, 0, 20)
+AlertContainer.Size = UDim2.new(0, 180, 0, 0)
 AlertContainer.BackgroundTransparency = 1
-
 local AlertList = Instance.new("UIListLayout")
-AlertList.Padding = UDim.new(0, 6)
+AlertList.Padding = UDim.new(0, 4)
 AlertList.SortOrder = Enum.SortOrder.LayoutOrder
 AlertList.Parent = AlertContainer
 
 local function ShowEntityAlert(entityName)
     local alert = Instance.new("Frame")
-    alert.Size = UDim2.new(1, 0, 0, 36)
+    alert.Size = UDim2.new(1, 0, 0, 28)
     alert.BackgroundColor3 = Color3.fromRGB(40, 15, 15)
     alert.BackgroundTransparency = 0.1
-
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 8)
-    c.Parent = alert
-
-    local stroke = Instance.new("UIStroke")
-    stroke.Color = Color3.fromRGB(255, 60, 60)
-    stroke.Thickness = 2
-    stroke.Parent = alert
-
+    local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 6); c.Parent = alert
+    local stroke = Instance.new("UIStroke"); stroke.Color = Color3.fromRGB(255, 60, 60); stroke.Thickness = 1.5; stroke.Parent = alert
     local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1, -12, 1, 0)
-    lbl.Position = UDim2.new(0, 6, 0, 0)
+    lbl.Size = UDim2.new(1, -10, 1, 0)
+    lbl.Position = UDim2.new(0, 5, 0, 0)
     lbl.BackgroundTransparency = 1
     lbl.Text = "⚠ " .. entityName .. " SPAWNED"
     lbl.TextColor3 = Color3.fromRGB(255, 220, 220)
     lbl.Font = Enum.Font.GothamBold
-    lbl.TextSize = 13
+    lbl.TextSize = 10
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Parent = alert
-
     alert.Parent = AlertContainer
-
-    task.delay(5, function()
+    task.delay(4, function()
         if alert and alert.Parent then
-            local tween = TweenService:Create(alert, TweenInfo.new(0.6), { BackgroundTransparency = 1 })
+            local tween = TweenService:Create(alert, TweenInfo.new(0.5), { BackgroundTransparency = 1 })
             tween:Play()
             tween.Completed:Connect(function() alert:Destroy() end)
         end
@@ -468,7 +507,6 @@ local function ShowEntityAlert(entityName)
 end
 
 local alertDebounce = {}
-
 workspace.DescendantAdded:Connect(function(child)
     if not _G.EntityAlert then return end
     if not (child:IsA("Model") or child:IsA("BasePart")) then return end
@@ -480,78 +518,221 @@ workspace.DescendantAdded:Connect(function(child)
     ShowEntityAlert(child.Name)
 end)
 
--- Item / Entity caches + refresh
-local ItemEspCache = {}
-local EntityEspCache = {}
+-- =============================================================================
+-- CANDIDATE FILTERS
+-- =============================================================================
 
-local function RefreshItemEsp()
-    for item, adorn in pairs(ItemEspCache) do
-        if not item or not item.Parent or not IsItemCandidate(item) then
-            if adorn and adorn.Parent then adorn:Destroy() end
-            ItemEspCache[item] = nil
-        else
-            local pos = GetWorldPos(item)
-            adorn.Visible = _G.ItemEsp and pos ~= nil and WithinEspRange(pos)
+local function IsItemCandidate(obj)
+    if not obj or not obj.Parent then return false end
+    if IsHeldByLocal(obj) then return false end
+    if not InCurrentRoom(obj) then return false end
+    if _G.ItemEspToolsOnly then return obj:IsA("Tool") end
+    if obj:IsA("Tool") then return true end
+    if obj:IsA("BasePart") and obj.Parent == workspace and not obj.Anchored and not obj.CanCollide then return true end
+    return false
+end
+
+local function IsKeyCandidate(obj)
+    if not obj or not obj.Parent then return false end
+    if IsHeldByLocal(obj) then return false end
+    if not InCurrentRoom(obj) then return false end
+    if not string.find(string.lower(obj.Name), "key", 1, true) then return false end
+    return obj:IsA("Tool") or obj:IsA("Model") or obj:IsA("BasePart")
+end
+
+local function IsBookCandidate(obj)
+    if not obj or not obj.Parent then return false end
+    if IsHeldByLocal(obj) then return false end
+    if not InCurrentRoom(obj) then return false end
+    if not string.find(string.lower(obj.Name), "book", 1, true) then return false end
+    return obj:IsA("Tool") or obj:IsA("Model") or obj:IsA("BasePart")
+end
+
+local function IsMechCandidate(obj)
+    if not obj or not obj.Parent then return false end
+    if IsHeldByLocal(obj) then return false end
+    if not InCurrentRoom(obj) then return false end
+    if not MatchesMechanismKeyword(obj.Name) then return false end
+    return obj:IsA("Tool") or obj:IsA("Model") or obj:IsA("BasePart")
+end
+
+local function IsBreakerCandidate(obj)
+    if not obj or not obj.Parent then return false end
+    if IsHeldByLocal(obj) then return false end
+    if not InCurrentRoom(obj) then return false end
+    local lname = string.lower(obj.Name)
+    if not (string.find(lname, "breaker", 1, true) or string.find(lname, "pole", 1, true) or string.find(lname, "switch", 1, true)) then return false end
+    return obj:IsA("Tool") or obj:IsA("Model") or obj:IsA("BasePart")
+end
+
+local function IsDoorCandidate(obj)
+    if not obj or not obj.Parent then return false end
+    if not obj:IsA("Model") then return false end
+    if not string.find(string.lower(obj.Name), "door", 1, true) then return false end
+    if not InCurrentRoom(obj) then return false end
+    return true
+end
+
+-- ENTITIES: global, not room-scoped, but range-respected
+local function IsEntityCandidate(obj)
+    if not obj or not obj.Parent or not obj:IsA("Model") then return false end
+    if IsPlayerCharacter(obj) then return false end
+    local hum = obj:FindFirstChildOfClass("Humanoid")
+    if hum and hum.Health > 0 then return true end
+    if _G.EntityEspNamed and MatchesEntityKeyword(obj.Name) then return true end
+    return false
+end
+
+-- =============================================================================
+-- CACHES + REFRESH
+-- =============================================================================
+
+local ItemEspCache, EntityEspCache, KeyEspCache = {}, {}, {}
+local BookEspCache, MechEspCache, BreakerEspCache, DoorEspCache = {}, {}, {}, {}
+
+local function CleanupCache(cache, isCandidate)
+    for obj, data in pairs(cache) do
+        if not obj or not obj.Parent or not isCandidate(obj) then
+            if data.box and data.box.Parent then data.box:Destroy() end
+            if data.label and data.label.Parent then data.label:Destroy() end
+            if data.highlight and data.highlight.Parent then data.highlight:Destroy() end
+            cache[obj] = nil
         end
     end
+end
 
+local function AddEspObject(cache, obj, color, labelText, boxSize, transparency, zindex, useHighlight)
+    local pos = GetWorldPos(obj)
+    if not pos then return end
+    if not WithinEspRange(pos) then return end
+    local data = {}
+    if useHighlight then
+        data.highlight = CreateDoorHighlight(obj, obj, color)
+    else
+        local adornee = GetAdornee(obj)
+        if not adornee then return end
+        data.box = CreateEspBox(obj, adornee, color, "DeltaEspBox", boxSize, transparency, zindex)
+    end
+    data.label = CreateEspLabel(obj, labelText, color, useHighlight and 12 or 10)
+    cache[obj] = data
+end
+
+local function RefreshItemEsp()
+    CleanupCache(ItemEspCache, IsItemCandidate)
     if not _G.ItemEsp then return end
-
     for _, obj in pairs(workspace:GetDescendants()) do
         if IsItemCandidate(obj) and not ItemEspCache[obj] then
-            local pos = GetWorldPos(obj)
-            if pos and WithinEspRange(pos) then
-                local adornee = GetAdornee(obj)
-                if adornee then
-                    local color = obj:IsA("Tool") and Color3.fromRGB(255, 200, 0) or Color3.fromRGB(0, 255, 180)
-                    ItemEspCache[obj] = CreateEspBox(obj, adornee, color, "DeltaItemEsp")
-                end
-            end
+            local color = obj:IsA("Tool") and Color3.fromRGB(255, 200, 0) or Color3.fromRGB(0, 255, 180)
+            AddEspObject(ItemEspCache, obj, color, obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
         end
     end
 end
 
 local function RefreshEntityEsp()
-    for ent, adorn in pairs(EntityEspCache) do
-        if not ent or not ent.Parent or not IsEntityCandidate(ent) then
-            if adorn and adorn.Parent then adorn:Destroy() end
-            EntityEspCache[ent] = nil
-        else
-            local pos = GetWorldPos(ent)
-            adorn.Visible = _G.EntityEsp and pos ~= nil and WithinEspRange(pos)
-        end
-    end
-
+    CleanupCache(EntityEspCache, IsEntityCandidate)
     if not _G.EntityEsp then return end
-
     for _, obj in pairs(workspace:GetDescendants()) do
         if IsEntityCandidate(obj) and not EntityEspCache[obj] then
-            local pos = GetWorldPos(obj)
-            if pos and WithinEspRange(pos) then
-                local adornee = GetAdornee(obj)
-                if adornee then
-                    EntityEspCache[obj] = CreateEspBox(obj, adornee, Color3.fromRGB(255, 80, 80), "DeltaEntityEsp")
-                end
-            end
+            AddEspObject(EntityEspCache, obj, Color3.fromRGB(255, 30, 30), "⚠ " .. obj.Name, Vector3.new(7, 9, 7), 0.25, 20, false)
         end
     end
 end
 
+local function RefreshKeyEsp()
+    CleanupCache(KeyEspCache, IsKeyCandidate)
+    if not _G.KeyEsp then return end
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if IsKeyCandidate(obj) and not KeyEspCache[obj] then
+            AddEspObject(KeyEspCache, obj, Color3.fromRGB(255, 220, 0), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
+        end
+    end
+end
+
+local function RefreshBookEsp()
+    CleanupCache(BookEspCache, IsBookCandidate)
+    if not _G.BookEsp then return end
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if IsBookCandidate(obj) and not BookEspCache[obj] then
+            AddEspObject(BookEspCache, obj, Color3.fromRGB(0, 200, 255), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
+        end
+    end
+end
+
+local function RefreshMechEsp()
+    CleanupCache(MechEspCache, IsMechCandidate)
+    if not _G.MechEsp then return end
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if IsMechCandidate(obj) and not MechEspCache[obj] then
+            AddEspObject(MechEspCache, obj, Color3.fromRGB(255, 140, 0), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
+        end
+    end
+end
+
+local function RefreshBreakerEsp()
+    CleanupCache(BreakerEspCache, IsBreakerCandidate)
+    if not _G.BreakerEsp then return end
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if IsBreakerCandidate(obj) and not BreakerEspCache[obj] then
+            AddEspObject(BreakerEspCache, obj, Color3.fromRGB(180, 80, 255), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
+        end
+    end
+end
+
+local function RefreshDoorEsp()
+    CleanupCache(DoorEspCache, IsDoorCandidate)
+    if not _G.DoorEsp then return end
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if IsDoorCandidate(obj) and not DoorEspCache[obj] then
+            local label = obj.Name
+            local numVal = obj:FindFirstChildWhichIsA("NumberValue")
+            if numVal then label = obj.Name .. " (" .. tostring(numVal.Value) .. ")" end
+            AddEspObject(DoorEspCache, obj, Color3.fromRGB(255, 220, 0), label, nil, nil, nil, true)
+        end
+    end
+end
+
+-- Entity pulse
 task.spawn(function()
     while true do
-        task.wait(0.5)
-        pcall(RefreshItemEsp)
-        pcall(RefreshEntityEsp)
+        task.wait(0.4)
+        for _, data in pairs(EntityEspCache) do
+            if data.box and data.box.Parent then
+                local t = tick() % 1
+                data.box.Transparency = 0.15 + math.abs(math.sin(t * math.pi)) * 0.35
+            end
+        end
     end
 end)
 
--- VISUALS / ESP PANEL POPULATION
-AddToggleComponent(P_Combat, "Box ESP", "BoxEsp")
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        DetectCurrentRoom()
+        pcall(RefreshItemEsp)
+        pcall(RefreshEntityEsp)
+        pcall(RefreshKeyEsp)
+        pcall(RefreshBookEsp)
+        pcall(RefreshMechEsp)
+        pcall(RefreshBreakerEsp)
+        pcall(RefreshDoorEsp)
+    end
+end)
+
+-- =============================================================================
+-- VISUALS / ESP PANEL
+-- =============================================================================
+
+AddToggleComponent(P_Combat, "Box ESP (Players)", "BoxEsp")
 AddToggleComponent(P_Combat, "ESP Team Colors", "EspTeamColor")
 AddInputComponent(P_Combat, "ESP Range (studs):", "300", function(val) _G.EspRange = val end)
 AddToggleComponent(P_Combat, "Item ESP", "ItemEsp")
 AddToggleComponent(P_Combat, "Item ESP - Tools Only", "ItemEspToolsOnly")
-AddToggleComponent(P_Combat, "Entity ESP (Humanoid)", "EntityEsp")
+AddToggleComponent(P_Combat, "Key ESP", "KeyEsp")
+AddToggleComponent(P_Combat, "Book ESP (Door 50)", "BookEsp")
+AddToggleComponent(P_Combat, "Mechanism ESP (Door 150)", "MechEsp")
+AddToggleComponent(P_Combat, "Breaker Pole ESP (Door 100)", "BreakerEsp")
+AddToggleComponent(P_Combat, "Door ESP (Current Room)", "DoorEsp")
+AddToggleComponent(P_Combat, "Entity ESP (Global)", "EntityEsp")
 AddToggleComponent(P_Combat, "Entity ESP - Named", "EntityEspNamed")
 AddToggleComponent(P_Combat, "Entity Spawn Alert", "EntityAlert", function(state)
     if not state then return end
@@ -580,7 +761,7 @@ AddInputComponent(P_Combat, "Camera FOV:", "70", function(val)
     workspace.CurrentCamera.FieldOfView = val
 end)
 
--- SETTINGS PANEL POPULATION
+-- SETTINGS
 local GridContainer = Instance.new("Frame")
 GridContainer.Size = UDim2.new(1, 0, 0, 50); GridContainer.BackgroundTransparency = 1; GridContainer.Parent = P_Settings
 local grid = Instance.new("UIGridLayout"); grid.CellSize = UDim2.new(0.48, 0, 0, 22); grid.CellPadding = UDim2.new(0, 4, 0, 4); grid.Parent = GridContainer
@@ -607,7 +788,6 @@ function StartCheatEngineLoops()
         VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
     end)
 
-    -- Speed + jump
     RunService.Heartbeat:Connect(function()
         if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character:FindFirstChild("Humanoid") then
             local humanoid = LocalPlayer.Character.Humanoid
@@ -625,7 +805,6 @@ function StartCheatEngineLoops()
         end
     end)
 
-    -- Noclip
     RunService.Stepped:Connect(function()
         if _G.Noclip and LocalPlayer.Character then
             for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
@@ -637,14 +816,12 @@ function StartCheatEngineLoops()
         end
     end)
 
-    -- Infinite jump
     UserInputService.JumpRequest:Connect(function()
         if _G.InfJump and LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
             LocalPlayer.Character:FindFirstChildOfClass("Humanoid"):ChangeState("Jumping")
         end
     end)
 
-    -- Player box ESP + nametags
     RunService.Heartbeat:Connect(function()
         for _, p in pairs(Players:GetPlayers()) do
             if p ~= LocalPlayer and p.Character then
