@@ -1,5 +1,5 @@
 -- =============================================================================
--- DELTA MASTER v5.6.4 — LAG-FIXED
+-- DELTA MASTER v5.6.5 — ROOM-SCOPED, NON-LAG, FAST
 -- =============================================================================
 
 if game.CoreGui:FindFirstChild("DeltaCheatMenuV5") then
@@ -65,7 +65,7 @@ local Presets = {
 }
 
 -- =============================================================================
--- UI (unchanged from v5.6.3)
+-- UI (identical to v5.6.4)
 -- =============================================================================
 
 local ScreenGui = Instance.new("ScreenGui")
@@ -109,7 +109,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -20, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DELTA MASTER v5.6.4"
+Title.Text = "DELTA MASTER v5.6.5"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 13
 Title.Font = Enum.Font.GothamBold
@@ -276,7 +276,7 @@ AddInputComponent(P_Movement, "Jump Power:", "50", function(val) _G.JumpValue = 
 AddInputComponent(P_Movement, "Gravity Mod:", "196", function(val) _G.GravityValue = val workspace.Gravity = val end)
 
 -- =============================================================================
--- CORE HELPERS
+-- HELPERS
 -- =============================================================================
 
 local ENTITY_KEYWORDS = {
@@ -299,6 +299,7 @@ local PICKUP_HINTS = { "pick", "take", "grab", "collect", "use" }
 
 local MAX_ESP_OBJECTS = 60
 local MAX_SCANNER_OBJECTS = 40
+local SCAN_CHUNK = 400
 
 local function MatchesKeyword(name, list)
     local lname = string.lower(name)
@@ -358,14 +359,6 @@ local function GetAdornee(obj)
     return nil
 end
 
-local function IsHeldByLocal(obj)
-    if not LocalPlayer.Character then return false end
-    if obj:IsDescendantOf(LocalPlayer.Character) then return true end
-    local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
-    if backpack and obj:IsDescendantOf(backpack) then return true end
-    return false
-end
-
 local function GetIdentity(obj)
     if obj:IsA("Tool") then return obj end
     if obj:IsA("Model") then return obj end
@@ -377,6 +370,16 @@ local function GetIdentity(obj)
         return obj
     end
     return obj
+end
+
+-- FIX: check identity, not obj, so duplicates in backpack are caught
+local function IsHeldByLocal(obj)
+    local identity = GetIdentity(obj)
+    if not LocalPlayer.Character then return false end
+    if identity:IsDescendantOf(LocalPlayer.Character) then return true end
+    local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+    if backpack and identity:IsDescendantOf(backpack) then return true end
+    return false
 end
 
 -- =============================================================================
@@ -484,7 +487,7 @@ workspace.DescendantAdded:Connect(function(child)
 end)
 
 -- =============================================================================
--- CANDIDATE FILTERS (no InCurrentRoom — the scan is already scoped)
+-- CANDIDATE FILTERS (no InCurrentRoom — scan is already room-scoped)
 -- =============================================================================
 
 local function IsItemCandidate(obj)
@@ -607,7 +610,7 @@ local function AddEspObject(cache, obj, color, labelText, boxSize, transparency,
 end
 
 -- =============================================================================
--- ROOM DETECTION (throttled)
+-- ROOM DETECTION (runs every tick until found)
 -- =============================================================================
 
 local currentRoomModel = nil
@@ -633,7 +636,7 @@ local function DetectCurrentRoom()
     end
 
     if currentRoomModel and currentRoomModel.Parent then return end
-    if os.clock() - lastRoomCheck < 2 then return end
+    if os.clock() - lastRoomCheck < 1 then return end
     lastRoomCheck = os.clock()
 
     if currentRoomNumber then
@@ -759,12 +762,11 @@ local function RenderScanListIfChanged()
 end
 
 -- =============================================================================
--- MAIN SCAN — scoped to room model, chunked
+-- SCAN — ROOM ONLY, CONTINUOUS, CHUNKED
 -- =============================================================================
 
 local scanIndex = 1
 local scanList = {}
-local SCAN_CHUNK = 200
 
 local function ProcessOneObject(obj)
     if _G.InteractablesEsp and IsInteractable(obj) then
@@ -792,10 +794,8 @@ local function ProcessOneObject(obj)
         if nv then label = obj.Name .. " (" .. tostring(nv.Value) .. ")" end
         AddEspObject(DoorEspCache, obj, Color3.fromRGB(255, 220, 0), label, nil, nil, nil, true)
     end
-    if obj:IsA("Model") or obj:IsA("BasePart") then
-        if _G.EntityEsp and IsEntityCandidate(obj) then
-            AddEspObject(EntityEspCache, obj, Color3.fromRGB(255, 30, 30), "⚠ " .. obj.Name, Vector3.new(7, 9, 7), 0.25, 20, false)
-        end
+    if _G.EntityEsp and (obj:IsA("Model") or obj:IsA("BasePart")) and IsEntityCandidate(obj) then
+        AddEspObject(EntityEspCache, obj, Color3.fromRGB(255, 30, 30), "⚠ " .. obj.Name, Vector3.new(7, 9, 7), 0.25, 20, false)
     end
     if _G.ScannerNames[obj.Name] and CacheCount(ScannerEspCache) < MAX_SCANNER_OBJECTS then
         local identity = GetIdentity(obj)
@@ -815,31 +815,41 @@ end
 
 task.spawn(function()
     while true do
-        task.wait(0.2)  -- 5 ticks per second
+        task.wait(0.15)
         DetectCurrentRoom()
 
-        -- Rebuild scan list only when room changes or list is exhausted
-        if roomChanged or scanIndex > #scanList then
-            local root = (currentRoomModel and currentRoomModel.Parent) and currentRoomModel or workspace
-            scanList = root:GetDescendants()
-            scanIndex = 1
-            roomChanged = false
-            lastScanDiscover = os.clock()
-            DiscoverRoomNames(scanList)
-            RenderScanListIfChanged()
-        end
-
-        -- Process one chunk (200 objects max per tick)
-        local endIdx = math.min(scanIndex + SCAN_CHUNK - 1, #scanList)
-        for i = scanIndex, endIdx do
-            local obj = scanList[i]
-            if obj and obj.Parent then
-                pcall(ProcessOneObject, obj)
+        -- Rebuild scan list only on room change — never falls back to workspace
+        if roomChanged or #scanList == 0 then
+            if currentRoomModel and currentRoomModel.Parent then
+                scanList = currentRoomModel:GetDescendants()
+                scanIndex = 1
+                roomChanged = false
+                lastScanDiscover = os.clock()
+                DiscoverRoomNames(scanList)
+                RenderScanListIfChanged()
+            else
+                -- no room detected — wait, don't scan
+                scanList = {}
+                scanIndex = 1
             end
         end
-        scanIndex = endIdx + 1
 
-        -- Cheap cleanup pass (no full scan)
+        -- Continuous chunked scan of current room's objects only
+        if #scanList > 0 then
+            local endIdx = math.min(scanIndex + SCAN_CHUNK - 1, #scanList)
+            for i = scanIndex, endIdx do
+                local obj = scanList[i]
+                if obj and obj.Parent then
+                    pcall(ProcessOneObject, obj)
+                end
+            end
+            scanIndex = endIdx + 1
+            if scanIndex > #scanList then
+                scanIndex = 1  -- loop, don't rebuild
+            end
+        end
+
+        -- Cleanup
         CleanupCache(ItemEspCache, IsItemCandidate)
         CleanupCache(KeyEspCache, IsKeyCandidate)
         CleanupCache(BookEspCache, IsBookCandidate)
@@ -932,7 +942,7 @@ for name, hex in pairs(Presets) do
 end
 
 -- =============================================================================
--- RUNTIME LOOPS
+-- RUNTIME
 -- =============================================================================
 
 function StartCheatEngineLoops()
