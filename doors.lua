@@ -1,5 +1,5 @@
 -- =============================================================================
--- PART 1: CORE FRAMEWORK, ENGINE LAYERS, & INTERFACE CONFIGURATION
+-- DELTA MASTER v5.6.2
 -- =============================================================================
 
 if game.CoreGui:FindFirstChild("DeltaCheatMenuV5") then
@@ -7,12 +7,7 @@ if game.CoreGui:FindFirstChild("DeltaCheatMenuV5") then
 end
 
 for _, obj in pairs(workspace:GetDescendants()) do
-    if obj:IsA("BoxHandleAdornment") and (
-        obj.Name == "DeltaBoxEsp" or obj.Name == "DeltaItemEsp" or
-        obj.Name == "DeltaEntityEsp" or obj.Name == "DeltaKeyEsp" or
-        obj.Name == "DeltaBookEsp" or obj.Name == "DeltaMechEsp" or
-        obj.Name == "DeltaBreakerEsp" or obj.Name == "DeltaInteractEsp"
-    ) then obj:Destroy() end
+    if obj:IsA("BoxHandleAdornment") and string.find(obj.Name, "^Delta") then obj:Destroy() end
     if obj:IsA("Highlight") and obj.Name == "DeltaDoorEsp" then obj:Destroy() end
     if obj:IsA("BillboardGui") and obj.Name == "DeltaEspLabel" then obj:Destroy() end
 end
@@ -50,7 +45,6 @@ _G.EntityEsp = false
 _G.EntityEspNamed = false
 _G.EntityAlert = false
 _G.InteractablesEsp = false
-_G.ScannerEsp = false
 _G.ScannerNames = {}
 
 local LightBackup = {
@@ -71,7 +65,7 @@ local Presets = {
 }
 
 -- =============================================================================
--- PART 2: UI
+-- UI
 -- =============================================================================
 
 local ScreenGui = Instance.new("ScreenGui")
@@ -115,7 +109,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -20, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DELTA MASTER v5.6.1"
+Title.Text = "DELTA MASTER v5.6.2"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 13
 Title.Font = Enum.Font.GothamBold
@@ -282,7 +276,7 @@ AddInputComponent(P_Movement, "Jump Power:", "50", function(val) _G.JumpValue = 
 AddInputComponent(P_Movement, "Gravity Mod:", "196", function(val) _G.GravityValue = val workspace.Gravity = val end)
 
 -- =============================================================================
--- PART 3: VISUALS / ESP
+-- VISUALS / ESP
 -- =============================================================================
 
 local ENTITY_KEYWORDS = {
@@ -295,6 +289,16 @@ local ENTITY_KEYWORDS = {
     "entity", "monster", "enemy", "boss",
 }
 local MECHANISM_KEYWORDS = { "anchor", "generator", "lever", "circuit", "breaker" }
+local SCANNER_KEYWORDS = {
+    "key", "lighter", "lockpick", "flashlight", "torch",
+    "book", "breaker", "pole", "anchor", "generator", "lever",
+    "door", "button", "switch", "fuse", "battery", "candle",
+    "closet", "wardrobe", "room", "hint", "prompt", "pickup", "item",
+}
+local PICKUP_HINTS = { "pick", "take", "grab", "collect", "use" }
+
+local MAX_ESP_OBJECTS = 60
+local MAX_SCANNER_OBJECTS = 40
 
 local function MatchesKeyword(name, list)
     local lname = string.lower(name)
@@ -303,8 +307,6 @@ local function MatchesKeyword(name, list)
     end
     return nil
 end
-local function MatchesEntityKeyword(name) return MatchesKeyword(name, ENTITY_KEYWORDS) end
-local function MatchesMechanismKeyword(name) return MatchesKeyword(name, MECHANISM_KEYWORDS) end
 
 local function GetLocalHRP()
     if LocalPlayer.Character then
@@ -364,10 +366,7 @@ local function IsHeldByLocal(obj)
     return false
 end
 
--- =============================================================================
--- CURRENT ROOM DETECTION
--- =============================================================================
-
+-- ROOM DETECTION
 local currentRoomModel = nil
 local currentRoomNumber = nil
 local lastRoomCheck = 0
@@ -387,11 +386,9 @@ local function DetectCurrentRoom()
             end
         end
     end
-
     if currentRoomModel and currentRoomModel.Parent then return end
     if os.clock() - lastRoomCheck < 2 then return end
     lastRoomCheck = os.clock()
-
     if currentRoomNumber then
         for _, obj in pairs(workspace:GetChildren()) do
             if obj:IsA("Model") and string.find(obj.Name, tostring(currentRoomNumber), 1, true) then
@@ -400,7 +397,6 @@ local function DetectCurrentRoom()
             end
         end
     end
-
     if not currentRoomModel then
         local hrp = GetLocalHRP()
         if hrp then
@@ -430,10 +426,17 @@ local function InCurrentRoom(obj)
     return false
 end
 
--- =============================================================================
--- VISUAL BUILDERS
--- =============================================================================
+-- TOP-LEVEL DEDUPE (one box per closet, etc.)
+local function GetTopLevelAncestor(obj)
+    local current = obj
+    local stopAt = (currentRoomModel and currentRoomModel.Parent) and currentRoomModel or workspace
+    while current.Parent and current.Parent ~= workspace and current.Parent ~= stopAt do
+        current = current.Parent
+    end
+    return current
+end
 
+-- VISUAL BUILDERS
 local function CreateEspBox(parent, adornee, color, name, size, transparency, zindex)
     local box = Instance.new("BoxHandleAdornment")
     box.Name = name
@@ -480,10 +483,7 @@ local function CreateDoorHighlight(parent, adornee, color)
     return hl
 end
 
--- =============================================================================
 -- ALERT
--- =============================================================================
-
 local AlertContainer = Instance.new("Frame")
 AlertContainer.Name = "DeltaAlertContainer"
 AlertContainer.Parent = ScreenGui
@@ -526,7 +526,7 @@ local alertDebounce = {}
 workspace.DescendantAdded:Connect(function(child)
     if not _G.EntityAlert then return end
     if not (child:IsA("Model") or child:IsA("BasePart")) then return end
-    local kw = MatchesEntityKeyword(child.Name)
+    local kw = MatchesKeyword(child.Name, ENTITY_KEYWORDS)
     if not kw then return end
     local now = os.clock()
     if alertDebounce[kw] and now - alertDebounce[kw] < 3 then return end
@@ -534,10 +534,7 @@ workspace.DescendantAdded:Connect(function(child)
     ShowEntityAlert(child.Name)
 end)
 
--- =============================================================================
 -- CANDIDATE FILTERS
--- =============================================================================
-
 local function IsItemCandidate(obj)
     if not obj or not obj.Parent then return false end
     if IsHeldByLocal(obj) then return false end
@@ -569,7 +566,7 @@ local function IsMechCandidate(obj)
     if not obj or not obj.Parent then return false end
     if IsHeldByLocal(obj) then return false end
     if not InCurrentRoom(obj) then return false end
-    if not MatchesMechanismKeyword(obj.Name) then return false end
+    if not MatchesKeyword(obj.Name, MECHANISM_KEYWORDS) then return false end
     return obj:IsA("Tool") or obj:IsA("Model") or obj:IsA("BasePart")
 end
 
@@ -597,7 +594,7 @@ local function IsEntityCandidate(obj)
     if IsPlayerCharacter(obj) then return false end
     local hum = obj:FindFirstChildOfClass("Humanoid")
     if hum and hum.Health > 0 then return true end
-    if _G.EntityEspNamed and MatchesEntityKeyword(obj.Name) then return true end
+    if _G.EntityEspNamed and MatchesKeyword(obj.Name, ENTITY_KEYWORDS) then return true end
     return false
 end
 
@@ -607,20 +604,17 @@ local function IsInteractable(obj)
     if not InCurrentRoom(obj) then return false end
     if not (obj:IsA("Model") or obj:IsA("BasePart") or obj:IsA("Tool")) then return false end
     if obj:IsA("Tool") then return true end
-    if obj:FindFirstChildWhichIsA("ProximityPrompt", true) then return true end
-    if obj:FindFirstChildWhichIsA("ClickDetector", true) then return true end
-    for _, v in pairs(obj:GetChildren()) do
-        if v:IsA("BoolValue") and (v.Name == "Interactable" or v.Name == "Usable" or v.Name == "CanUse") and v.Value then
-            return true
+    local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+    if prompt then
+        local act = string.lower(prompt.ActionText or "")
+        for _, hint in ipairs(PICKUP_HINTS) do
+            if string.find(act, hint, 1, true) then return true end
         end
     end
     return false
 end
 
--- =============================================================================
 -- CACHES
--- =============================================================================
-
 local ItemEspCache, EntityEspCache, KeyEspCache = {}, {}, {}
 local BookEspCache, MechEspCache, BreakerEspCache, DoorEspCache = {}, {}, {}, {}
 local InteractEspCache = {}
@@ -636,20 +630,31 @@ local function CleanupCache(cache, isCandidate)
     end
 end
 
+local function CacheCount(cache)
+    local n = 0
+    for _ in pairs(cache) do n = n + 1 end
+    return n
+end
+
 local function AddEspObject(cache, obj, color, labelText, boxSize, transparency, zindex, useHighlight)
-    local pos = GetWorldPos(obj)
+    local top = GetTopLevelAncestor(obj)
+    if cache[top] then return end
+    if CacheCount(cache) >= MAX_ESP_OBJECTS then return end
+
+    local pos = GetWorldPos(top) or GetWorldPos(obj)
     if not pos then return end
     if not WithinEspRange(pos) then return end
+
     local data = {}
     if useHighlight then
-        data.highlight = CreateDoorHighlight(obj, obj, color)
+        data.highlight = CreateDoorHighlight(top, top, color)
     else
-        local adornee = GetAdornee(obj)
+        local adornee = GetAdornee(top) or GetAdornee(obj)
         if not adornee then return end
-        data.box = CreateEspBox(obj, adornee, color, "DeltaEspBox", boxSize, transparency, zindex)
+        data.box = CreateEspBox(top, adornee, color, "DeltaEspBox", boxSize, transparency, zindex)
     end
-    data.label = CreateEspLabel(obj, labelText, color, useHighlight and 12 or 10)
-    cache[obj] = data
+    data.label = CreateEspLabel(top, labelText, color, useHighlight and 12 or 10)
+    cache[top] = data
 end
 
 -- Entity pulse
@@ -664,32 +669,23 @@ task.spawn(function()
     end
 end)
 
--- =============================================================================
 -- SCANNER
--- =============================================================================
-
 local ScanList = {}
 local ScanToggles = {}
 local ScannerEspCache = {}
 local lastScanDiscover = 0
+local lastScanSignature = ""
 
 local function IsInterestingForScanner(obj)
     if not obj or not obj.Parent then return false end
     if obj:IsA("Terrain") or obj:IsA("Camera") then return false end
-    if not (obj:IsA("Model") or obj:IsA("BasePart") or obj:IsA("Tool")) then return false end
     if string.find(obj.Name, "^Delta") then return false end
+    if not (obj:IsA("Model") or obj:IsA("BasePart") or obj:IsA("Tool")) then return false end
     if obj:IsA("Tool") then return true end
-    if obj:IsA("Model") then
-        if currentRoomModel and obj == currentRoomModel then return false end
-        for _, p in ipairs(obj:GetDescendants()) do
-            if p:IsA("BasePart") and (not p.Anchored or not p.CanCollide) then return true end
-        end
-        return false
-    end
-    if obj:IsA("BasePart") then
-        if obj.Anchored and obj.CanCollide then return false end
-        return true
-    end
+    if currentRoomModel and obj == currentRoomModel then return false end
+    if MatchesKeyword(obj.Name, SCANNER_KEYWORDS) then return true end
+    if obj:FindFirstChildWhichIsA("ProximityPrompt", true) then return true end
+    if obj:FindFirstChildWhichIsA("ClickDetector", true) then return true end
     return false
 end
 
@@ -697,9 +693,7 @@ local function DiscoverRoomNames()
     local found = {}
     local root = (currentRoomModel and currentRoomModel.Parent) and currentRoomModel or workspace
     for _, obj in ipairs(root:GetDescendants()) do
-        if IsInterestingForScanner(obj) then
-            found[obj.Name] = true
-        end
+        if IsInterestingForScanner(obj) then found[obj.Name] = true end
     end
     local newList = {}
     for name in pairs(found) do table.insert(newList, name) end
@@ -758,6 +752,13 @@ local function RenderScanList()
     end
 end
 
+local function RenderScanListIfChanged()
+    local sig = table.concat(ScanList, "|")
+    if sig == lastScanSignature then return end
+    lastScanSignature = sig
+    RenderScanList()
+end
+
 local function RefreshScannerEsp()
     for obj, data in pairs(ScannerEspCache) do
         if not obj or not obj.Parent then
@@ -771,27 +772,32 @@ local function RefreshScannerEsp()
             if data.label then data.label.Enabled = show and true or false end
         end
     end
+
+    if CacheCount(ScannerEspCache) >= MAX_SCANNER_OBJECTS then return end
+
     for _, obj in ipairs(workspace:GetDescendants()) do
+        if CacheCount(ScannerEspCache) >= MAX_SCANNER_OBJECTS then break end
         if (obj:IsA("Model") or obj:IsA("BasePart") or obj:IsA("Tool"))
-            and _G.ScannerNames[obj.Name]
-            and not ScannerEspCache[obj] then
-            local pos = GetWorldPos(obj)
-            if pos and WithinEspRange(pos) then
-                local adornee = GetAdornee(obj)
-                if adornee then
-                    local box = CreateEspBox(obj, adornee, CurrentThemeColor, "DeltaEspBox", Vector3.new(3, 3, 3), 0.5, 8)
-                    local label = CreateEspLabel(obj, obj.Name, CurrentThemeColor, 9)
-                    ScannerEspCache[obj] = {box = box, label = label}
+            and _G.ScannerNames[obj.Name] then
+            local top = GetTopLevelAncestor(obj)
+            if top == obj or not ScannerEspCache[top] then
+                if not ScannerEspCache[top] then
+                    local pos = GetWorldPos(obj)
+                    if pos and WithinEspRange(pos) then
+                        local adornee = GetAdornee(obj)
+                        if adornee then
+                            local box = CreateEspBox(top, adornee, CurrentThemeColor, "DeltaEspBox", Vector3.new(3, 3, 3), 0.5, 8)
+                            local label = CreateEspLabel(top, top.Name, CurrentThemeColor, 9)
+                            ScannerEspCache[top] = {box = box, label = label}
+                        end
+                    end
                 end
             end
         end
     end
 end
 
--- =============================================================================
--- SINGLE SCAN LOOP
--- =============================================================================
-
+-- MAIN SCAN LOOP
 task.spawn(function()
     while true do
         task.wait(0.75)
@@ -800,14 +806,14 @@ task.spawn(function()
 
         if _G.InteractablesEsp then
             for _, obj in ipairs(all) do
-                if not InteractEspCache[obj] and IsInteractable(obj) then
+                if IsInteractable(obj) then
                     AddEspObject(InteractEspCache, obj, CurrentThemeColor, obj.Name, Vector3.new(3, 3, 3), 0.4, 15, false)
                 end
             end
         end
         if _G.ItemEsp then
             for _, obj in ipairs(all) do
-                if not ItemEspCache[obj] and IsItemCandidate(obj) then
+                if IsItemCandidate(obj) then
                     local c = obj:IsA("Tool") and Color3.fromRGB(255, 200, 0) or Color3.fromRGB(0, 255, 180)
                     AddEspObject(ItemEspCache, obj, c, obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
                 end
@@ -815,35 +821,35 @@ task.spawn(function()
         end
         if _G.KeyEsp then
             for _, obj in ipairs(all) do
-                if not KeyEspCache[obj] and IsKeyCandidate(obj) then
+                if IsKeyCandidate(obj) then
                     AddEspObject(KeyEspCache, obj, Color3.fromRGB(255, 220, 0), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
                 end
             end
         end
         if _G.BookEsp then
             for _, obj in ipairs(all) do
-                if not BookEspCache[obj] and IsBookCandidate(obj) then
+                if IsBookCandidate(obj) then
                     AddEspObject(BookEspCache, obj, Color3.fromRGB(0, 200, 255), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
                 end
             end
         end
         if _G.MechEsp then
             for _, obj in ipairs(all) do
-                if not MechEspCache[obj] and IsMechCandidate(obj) then
+                if IsMechCandidate(obj) then
                     AddEspObject(MechEspCache, obj, Color3.fromRGB(255, 140, 0), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
                 end
             end
         end
         if _G.BreakerEsp then
             for _, obj in ipairs(all) do
-                if not BreakerEspCache[obj] and IsBreakerCandidate(obj) then
+                if IsBreakerCandidate(obj) then
                     AddEspObject(BreakerEspCache, obj, Color3.fromRGB(180, 80, 255), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
                 end
             end
         end
         if _G.DoorEsp then
             for _, obj in ipairs(all) do
-                if not DoorEspCache[obj] and IsDoorCandidate(obj) then
+                if IsDoorCandidate(obj) then
                     local label = obj.Name
                     local nv = obj:FindFirstChildWhichIsA("NumberValue")
                     if nv then label = obj.Name .. " (" .. tostring(nv.Value) .. ")" end
@@ -853,7 +859,7 @@ task.spawn(function()
         end
         if _G.EntityEsp then
             for _, obj in ipairs(all) do
-                if not EntityEspCache[obj] and IsEntityCandidate(obj) then
+                if IsEntityCandidate(obj) then
                     AddEspObject(EntityEspCache, obj, Color3.fromRGB(255, 30, 30), "⚠ " .. obj.Name, Vector3.new(7, 9, 7), 0.25, 20, false)
                 end
             end
@@ -871,16 +877,13 @@ task.spawn(function()
         if os.clock() - lastScanDiscover > 1.5 then
             lastScanDiscover = os.clock()
             DiscoverRoomNames()
-            RenderScanList()
+            RenderScanListIfChanged()
         end
         pcall(RefreshScannerEsp)
     end
 end)
 
--- =============================================================================
 -- PANELS
--- =============================================================================
-
 AddToggleComponent(P_Combat, "Box ESP (Players)", "BoxEsp")
 AddToggleComponent(P_Combat, "ESP Team Colors", "EspTeamColor")
 AddInputComponent(P_Combat, "ESP Range (studs):", "300", function(val) _G.EspRange = val end)
@@ -899,7 +902,7 @@ AddToggleComponent(P_Combat, "Entity Spawn Alert", "EntityAlert", function(state
     task.spawn(function()
         for _, obj in pairs(workspace:GetDescendants()) do
             if obj:IsA("Model") or obj:IsA("BasePart") then
-                local kw = MatchesEntityKeyword(obj.Name)
+                local kw = MatchesKeyword(obj.Name, ENTITY_KEYWORDS)
                 if kw then
                     ShowEntityAlert(obj.Name)
                     alertDebounce[kw] = os.clock()
@@ -932,10 +935,7 @@ for name, hex in pairs(Presets) do
     p.Parent = GridContainer
 end
 
--- =============================================================================
--- PART 4: RUNTIME LOOPS
--- =============================================================================
-
+-- RUNTIME LOOPS
 function StartCheatEngineLoops()
     MinimizeBtn.Visible = true
     MainFrame.Visible = true
@@ -951,8 +951,8 @@ function StartCheatEngineLoops()
             local humanoid = LocalPlayer.Character.Humanoid
             local rootPart = LocalPlayer.Character.HumanoidRootPart
             if humanoid.MoveDirection.Magnitude > 0 and _G.SpeedValue > 16 then
-                local velocityVector = humanoid.MoveDirection * _G.SpeedValue
-                rootPart.AssemblyLinearVelocity = Vector3.new(velocityVector.X, rootPart.AssemblyLinearVelocity.Y, velocityVector.Z)
+                local v = humanoid.MoveDirection * _G.SpeedValue
+                rootPart.AssemblyLinearVelocity = Vector3.new(v.X, rootPart.AssemblyLinearVelocity.Y, v.Z)
             else
                 humanoid.WalkSpeed = _G.SpeedValue
             end
@@ -980,7 +980,13 @@ function StartCheatEngineLoops()
         end
     end)
 
-    RunService.Heartbeat:Connect(function()
+    -- Player ESP (throttled to 10fps)
+    local playerEspAccum = 0
+    RunService.Heartbeat:Connect(function(dt)
+        playerEspAccum = playerEspAccum + dt
+        if playerEspAccum < 0.1 then return end
+        playerEspAccum = 0
+
         for _, p in pairs(Players:GetPlayers()) do
             if p ~= LocalPlayer and p.Character then
                 local hum = p.Character:FindFirstChildOfClass("Humanoid")
@@ -1004,8 +1010,7 @@ function StartCheatEngineLoops()
                 local head = p.Character:FindFirstChild("Head")
                 if head then
                     local tag = head:FindFirstChild("DeltaNametag")
-                    local tagVisible = _G.Nametags and WithinEspRange(head.Position)
-                    if tagVisible then
+                    if _G.Nametags and WithinEspRange(head.Position) then
                         if not tag then
                             tag = Instance.new("BillboardGui")
                             tag.Name = "DeltaNametag"
