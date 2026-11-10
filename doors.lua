@@ -1,5 +1,5 @@
 -- =============================================================================
--- DELTA MASTER v5.6.11 — AUTO-COLLECT FIX, AMBUSH ROTATION
+-- DELTA MASTER v5.6.12 — MERGED AUTO, LAG-FIXED, CLEANED ESP
 -- =============================================================================
 
 if game.CoreGui:FindFirstChild("DeltaCheatMenuV5") then
@@ -37,9 +37,6 @@ _G.EspRange = 200
 _G.ItemEsp = false
 _G.ItemEspToolsOnly = false
 _G.KeyEsp = false
-_G.BookEsp = false
-_G.MechEsp = false
-_G.BreakerEsp = false
 _G.DoorEsp = false
 _G.EntityEsp = false
 _G.EntityAlert = false
@@ -51,8 +48,7 @@ _G.AutoHideRange = 150
 _G.AutoHideEntityList = { "rush", "ambush" }
 _G.AutoHideTurn = false
 _G.AutoHideTurnEntity = "ambush"
-_G.AutoOpenContainers = false
-_G.AutoCollectItems = false
+_G.AutoInteract = false
 _G.CollectRange = 25
 
 local LightBackup = {
@@ -117,7 +113,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -20, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DELTA MASTER v5.6.11"
+Title.Text = "DELTA MASTER v5.6.12"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 13
 Title.Font = Enum.Font.GothamBold
@@ -299,16 +295,13 @@ local ENTITY_KEYWORDS = {
     "rooms", "backrooms", "hq",
     "entity", "monster", "enemy", "boss",
 }
-local MECHANISM_KEYWORDS = { "anchor", "generator", "lever", "circuit", "breaker" }
 local PICKUP_HINTS = { "pick", "take", "grab", "collect", "use" }
-
 local CONTAINER_KEYWORDS = {
     "drawer", "chest", "desk", "dresser", "nightstand",
     "locker", "toolbox", "cabinet", "shelf", "compartment"
 }
 local OPEN_KEYWORDS = { "open", "search", "loot", "unlock", "check", "take" }
 local DENY_KEYWORDS = { "hide", "enter", "climb", "use", "sit", "crawl" }
-
 local GOLD_KEYWORDS = { "gold", "coin", "cash", "money", "knobs" }
 
 local MAX_ESP_OBJECTS = 60
@@ -510,28 +503,6 @@ local function IsKeyCandidate(obj)
     return obj:IsA("Tool") or obj:IsA("Model") or obj:IsA("BasePart")
 end
 
-local function IsBookCandidate(obj)
-    if not obj or not obj.Parent then return false end
-    if IsHeldByLocal(obj) then return false end
-    if not string.find(string.lower(obj.Name), "book", 1, true) then return false end
-    return obj:IsA("Tool") or obj:IsA("Model") or obj:IsA("BasePart")
-end
-
-local function IsMechCandidate(obj)
-    if not obj or not obj.Parent then return false end
-    if IsHeldByLocal(obj) then return false end
-    if not MatchesKeyword(obj.Name, MECHANISM_KEYWORDS) then return false end
-    return obj:IsA("Tool") or obj:IsA("Model") or obj:IsA("BasePart")
-end
-
-local function IsBreakerCandidate(obj)
-    if not obj or not obj.Parent then return false end
-    if IsHeldByLocal(obj) then return false end
-    local lname = string.lower(obj.Name)
-    if not (string.find(lname, "breaker", 1, true) or string.find(lname, "pole", 1, true) or string.find(lname, "switch", 1, true)) then return false end
-    return obj:IsA("Tool") or obj:IsA("Model") or obj:IsA("BasePart")
-end
-
 local function IsDoorCandidate(obj)
     if not obj or not obj.Parent then return false end
     if not (obj:IsA("Model") or obj:IsA("BasePart")) then return false end
@@ -575,11 +546,10 @@ end
 local isHiding = false
 local hidingCloset = nil
 local hideDebounce = 0
-local openDebounce = {}
+local interactDebounce = {}
 
 local lastAutoHide = 0
-local lastAutoOpen = 0
-local lastAutoCollect = 0
+local lastAutoInteract = 0
 
 local originalRotation = nil
 local hasRotated = false
@@ -732,47 +702,39 @@ local function IsGoldCandidate(obj)
     return false
 end
 
-local function TryAutoOpen()
-    if not _G.AutoOpenContainers then return end
+local function TryAutoInteract()
+    if not _G.AutoInteract then return end
     local hrp = GetLocalHRP()
     if not hrp then return end
-    local range = _G.EspRange or 200
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if (obj:IsA("Model") or obj:IsA("BasePart")) and IsContainerName(obj.Name) then
-            local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-            if prompt and IsOpenPrompt(prompt) then
-                local pos = GetWorldPos(obj)
-                if pos and (hrp.Position - pos).Magnitude <= range then
-                    local now = os.clock()
-                    if not openDebounce[obj] or now - openDebounce[obj] > 1 then
-                        openDebounce[obj] = now
-                        pcall(function() fireproximityprompt(prompt) end)
-                    end
-                end
-            end
-        end
-    end
-end
 
-local function TryAutoCollect()
-    if not _G.AutoCollectItems then return end
-    local hrp = GetLocalHRP()
-    if not hrp then return end
-    local range = _G.CollectRange or 25
+    local containerRange = _G.EspRange or 200
+    local collectRange = _G.CollectRange or 25
 
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if not obj.Parent then continue end
+    for _, obj in ipairs(scanList) do
+        if not obj or not obj.Parent then continue end
         local pos = GetWorldPos(obj)
         if not pos then continue end
         local dist = (hrp.Position - pos).Magnitude
-        if dist > range then continue end
 
-        local isTool = obj:IsA("Tool") and not IsHeldByLocal(obj)
-        local isGold = IsGoldCandidate(obj)
+        local prompt = nil
 
-        if isTool or isGold then
-            local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-            if prompt then
+        if dist <= containerRange and (obj:IsA("Model") or obj:IsA("BasePart")) and IsContainerName(obj.Name) then
+            local p = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if p and IsOpenPrompt(p) then prompt = p end
+        end
+
+        if not prompt and dist <= collectRange then
+            local isTool = obj:IsA("Tool") and not IsHeldByLocal(obj)
+            local isGold = IsGoldCandidate(obj)
+            if isTool or isGold then
+                prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+            end
+        end
+
+        if prompt then
+            local now = os.clock()
+            if not interactDebounce[obj] or now - interactDebounce[obj] > 1 then
+                interactDebounce[obj] = now
                 pcall(function() fireproximityprompt(prompt) end)
             end
         end
@@ -784,7 +746,7 @@ end
 -- =============================================================================
 
 local ItemEspCache, EntityEspCache, KeyEspCache = {}, {}, {}
-local BookEspCache, MechEspCache, BreakerEspCache, DoorEspCache = {}, {}, {}, {}
+local DoorEspCache = {}
 local InteractEspCache = {}
 local ScannerEspCache = {}
 
@@ -862,7 +824,6 @@ end)
 local scanIndex = 1
 local scanList = {}
 local lastScanRebuild = 0
-local lastObjectCount = 0
 
 local function ProcessOneObject(obj)
     if not obj or not obj.Parent then return end
@@ -879,15 +840,6 @@ local function ProcessOneObject(obj)
     end
     if _G.KeyEsp and IsKeyCandidate(obj) then
         AddEspObject(KeyEspCache, obj, Color3.fromRGB(255, 220, 0), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
-    end
-    if _G.BookEsp and IsBookCandidate(obj) then
-        AddEspObject(BookEspCache, obj, Color3.fromRGB(0, 200, 255), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
-    end
-    if _G.MechEsp and IsMechCandidate(obj) then
-        AddEspObject(MechEspCache, obj, Color3.fromRGB(255, 140, 0), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
-    end
-    if _G.BreakerEsp and IsBreakerCandidate(obj) then
-        AddEspObject(BreakerEspCache, obj, Color3.fromRGB(180, 80, 255), obj.Name, Vector3.new(4, 6, 4), 0.6, 9, false)
     end
     if _G.DoorEsp and IsDoorCandidate(obj) then
         local label = obj.Name
@@ -916,12 +868,10 @@ task.spawn(function()
         task.wait(0.15)
 
         local now = os.clock()
-        local currentCount = #workspace:GetDescendants()
-        if now - lastScanRebuild > 3 or math.abs(currentCount - lastObjectCount) > 50 then
+        if now - lastScanRebuild > 3 then
             scanList = workspace:GetDescendants()
             scanIndex = 1
             lastScanRebuild = now
-            lastObjectCount = currentCount
         end
 
         if #scanList > 0 then
@@ -936,9 +886,6 @@ task.spawn(function()
 
         CleanupCache(ItemEspCache, IsItemCandidate)
         CleanupCache(KeyEspCache, IsKeyCandidate)
-        CleanupCache(BookEspCache, IsBookCandidate)
-        CleanupCache(MechEspCache, IsMechCandidate)
-        CleanupCache(BreakerEspCache, IsBreakerCandidate)
         CleanupCache(DoorEspCache, IsDoorCandidate)
         CleanupCache(EntityEspCache, IsEntityCandidate)
         CleanupCache(InteractEspCache, IsInteractable)
@@ -960,13 +907,9 @@ task.spawn(function()
             lastAutoHide = os.clock()
             pcall(RunAutoHide)
         end
-        if os.clock() - lastAutoOpen > 1 then
-            lastAutoOpen = os.clock()
-            pcall(TryAutoOpen)
-        end
-        if os.clock() - lastAutoCollect > 0.2 then
-            lastAutoCollect = os.clock()
-            pcall(TryAutoCollect)
+        if os.clock() - lastAutoInteract > 0.3 then
+            lastAutoInteract = os.clock()
+            pcall(TryAutoInteract)
         end
     end
 end)
@@ -993,9 +936,6 @@ AddToggleComponent(P_Combat, "Interactables ESP", "InteractablesEsp")
 AddToggleComponent(P_Combat, "Item ESP", "ItemEsp")
 AddToggleComponent(P_Combat, "Item ESP - Tools Only", "ItemEspToolsOnly")
 AddToggleComponent(P_Combat, "Key ESP", "KeyEsp")
-AddToggleComponent(P_Combat, "Book ESP (Door 50)", "BookEsp")
-AddToggleComponent(P_Combat, "Mechanism ESP (Door 150)", "MechEsp")
-AddToggleComponent(P_Combat, "Breaker Pole ESP (Door 100)", "BreakerEsp")
 AddToggleComponent(P_Combat, "Door ESP", "DoorEsp")
 AddToggleComponent(P_Combat, "Entity ESP (Global)", "EntityEsp")
 AddToggleComponent(P_Combat, "Entity Spawn Alert", "EntityAlert", function(state)
@@ -1028,8 +968,7 @@ end)
 AddToggleComponent(P_Automation, "Auto-Hide (Rush/Ambush)", "AutoHide")
 AddInputComponent(P_Automation, "Auto-Hide Range:", "150", function(val) _G.AutoHideRange = val end)
 AddToggleComponent(P_Automation, "Turn 180° on Ambush Exit", "AutoHideTurn")
-AddToggleComponent(P_Automation, "Auto-Open Containers", "AutoOpenContainers")
-AddToggleComponent(P_Automation, "Auto-Collect Items", "AutoCollectItems")
+AddToggleComponent(P_Automation, "Auto-Interact (Open+Collect)", "AutoInteract")
 AddInputComponent(P_Automation, "Collect Range:", "25", function(val) _G.CollectRange = val end)
 
 local GridContainer = Instance.new("Frame")
