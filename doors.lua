@@ -1,5 +1,5 @@
 -- =============================================================================
--- DELTA MASTER v5.6.14 — AUTO-OPEN + GOLD ONLY
+-- DELTA MASTER v5.6.15 — HIDE TIMEOUT + LIBRARY LAG FIX
 -- =============================================================================
 
 if game.CoreGui:FindFirstChild("DeltaCheatMenuV5") then
@@ -45,6 +45,7 @@ _G.ScannerNames = {}
 
 _G.AutoHide = false
 _G.AutoHideRange = 150
+_G.HideTimeout = 5
 _G.AutoHideEntityList = { "rush", "ambush" }
 _G.AutoHideTurn = false
 _G.AutoHideTurnEntity = "ambush"
@@ -113,7 +114,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -20, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DELTA MASTER v5.6.14"
+Title.Text = "DELTA MASTER v5.6.15"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 13
 Title.Font = Enum.Font.GothamBold
@@ -550,6 +551,7 @@ end
 local isHiding = false
 local hidingCloset = nil
 local hideDebounce = 0
+local hideStartTime = 0
 local interactDebounce = {}
 
 local lastAutoHide = 0
@@ -616,32 +618,37 @@ local function ToggleClosetPrompt(closet)
     return true
 end
 
+local function ExitCloset()
+    if isHiding and hidingCloset then
+        ToggleClosetPrompt(hidingCloset)
+    end
+    isHiding = false
+    hidingCloset = nil
+    hideStartTime = 0
+    if hasRotated and originalRotation then
+        local hrp = GetLocalHRP()
+        if hrp then hrp.CFrame = CFrame.new(hrp.Position) * originalRotation end
+        hasRotated = false
+        originalRotation = nil
+    end
+end
+
 local function RunAutoHide()
     if not _G.AutoHide then
-        if isHiding and hidingCloset then
-            ToggleClosetPrompt(hidingCloset)
-            isHiding = false; hidingCloset = nil
-        end
-        if hasRotated and originalRotation then
-            local hrp = GetLocalHRP()
-            if hrp then hrp.CFrame = CFrame.new(hrp.Position) * originalRotation end
-            hasRotated = false; originalRotation = nil
-        end
+        ExitCloset()
+        return
+    end
+
+    -- Force exit after timeout
+    if isHiding and hideStartTime > 0 and (os.clock() - hideStartTime) > (_G.HideTimeout or 5) then
+        ExitCloset()
         return
     end
 
     local entity, dist = FindActiveEntity()
 
     if not entity or dist > (_G.AutoHideRange or 150) then
-        if isHiding and hidingCloset then
-            ToggleClosetPrompt(hidingCloset)
-            isHiding = false; hidingCloset = nil
-        end
-        if hasRotated and originalRotation then
-            local hrp = GetLocalHRP()
-            if hrp then hrp.CFrame = CFrame.new(hrp.Position) * originalRotation end
-            hasRotated = false; originalRotation = nil
-        end
+        ExitCloset()
         return
     end
 
@@ -651,7 +658,9 @@ local function RunAutoHide()
         hideDebounce = now
         local closet = FindNearestCloset()
         if closet and ToggleClosetPrompt(closet) then
-            isHiding = true; hidingCloset = closet
+            isHiding = true
+            hidingCloset = closet
+            hideStartTime = os.clock()
         end
     end
 
@@ -659,9 +668,7 @@ local function RunAutoHide()
         local lname = string.lower(entity.Name)
         if string.find(lname, _G.AutoHideTurnEntity, 1, true) then
             if isHiding and dist > (_G.AutoHideRange or 150) * 0.5 then
-                if hidingCloset then ToggleClosetPrompt(hidingCloset) end
-                isHiding = false; hidingCloset = nil
-
+                ExitCloset()
                 if not hasRotated then
                     local hrp = GetLocalHRP()
                     if hrp then
@@ -711,7 +718,7 @@ local function TryAutoInteract()
     local containerRange = _G.EspRange or 200
     local goldRange = _G.GoldRange or 30
 
-    for _, obj in ipairs(workspace:GetDescendants()) do
+    for _, obj in ipairs(scanList) do
         if not obj or not obj.Parent then continue end
 
         local pos = GetWorldPos(obj)
@@ -725,7 +732,7 @@ local function TryAutoInteract()
             if p and IsOpenPrompt(p) then prompt = p end
         end
 
-        if not prompt and dist <= goldRange and IsGoldCandidate(obj) then
+        if not prompt and dist <= goldRange and #obj.Name < 30 and IsGoldCandidate(obj) then
             prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
         end
 
@@ -901,7 +908,7 @@ task.spawn(function()
             lastAutoHide = os.clock()
             pcall(RunAutoHide)
         end
-        if os.clock() - lastAutoInteract > 0.3 then
+        if os.clock() - lastAutoInteract > 0.6 then
             lastAutoInteract = os.clock()
             pcall(TryAutoInteract)
         end
@@ -961,6 +968,7 @@ end)
 
 AddToggleComponent(P_Automation, "Auto-Hide (Rush/Ambush)", "AutoHide")
 AddInputComponent(P_Automation, "Auto-Hide Range:", "150", function(val) _G.AutoHideRange = val end)
+AddInputComponent(P_Automation, "Hide Timeout (sec):", "5", function(val) _G.HideTimeout = val end)
 AddToggleComponent(P_Automation, "Turn 180° on Ambush Exit", "AutoHideTurn")
 AddToggleComponent(P_Automation, "Auto-Open Drawers/Chests", "AutoInteract")
 AddInputComponent(P_Automation, "Gold Range:", "30", function(val) _G.GoldRange = val end)
