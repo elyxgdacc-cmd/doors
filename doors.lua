@@ -1,5 +1,5 @@
 -- =============================================================================
--- DELTA MASTER v5.6.12 — MERGED AUTO, LAG-FIXED, CLEANED ESP
+-- DELTA MASTER v5.6.14 — AUTO-OPEN + GOLD ONLY
 -- =============================================================================
 
 if game.CoreGui:FindFirstChild("DeltaCheatMenuV5") then
@@ -49,7 +49,7 @@ _G.AutoHideEntityList = { "rush", "ambush" }
 _G.AutoHideTurn = false
 _G.AutoHideTurnEntity = "ambush"
 _G.AutoInteract = false
-_G.CollectRange = 25
+_G.GoldRange = 30
 
 local LightBackup = {
     Ambient = Lighting.Ambient,
@@ -113,7 +113,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -20, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DELTA MASTER v5.6.12"
+Title.Text = "DELTA MASTER v5.6.14"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 13
 Title.Font = Enum.Font.GothamBold
@@ -302,11 +302,15 @@ local CONTAINER_KEYWORDS = {
 }
 local OPEN_KEYWORDS = { "open", "search", "loot", "unlock", "check", "take" }
 local DENY_KEYWORDS = { "hide", "enter", "climb", "use", "sit", "crawl" }
-local GOLD_KEYWORDS = { "gold", "coin", "cash", "money", "knobs" }
+local GOLD_KEYWORDS = { "gold", "coin", "cash", "money", "knobs", "golden", "goldpile", "goldbar", "goldnugget" }
 
 local MAX_ESP_OBJECTS = 60
 local MAX_SCANNER_OBJECTS = 40
 local SCAN_CHUNK = 400
+
+local scanList = {}
+local scanIndex = 1
+local lastScanRebuild = 0
 
 local function MatchesKeyword(name, list)
     local lname = string.lower(name)
@@ -685,10 +689,7 @@ local function IsOpenPrompt(prompt)
     for _, kw in ipairs(DENY_KEYWORDS) do
         if string.find(action, kw, 1, true) or string.find(object, kw, 1, true) then return false end
     end
-    for _, kw in ipairs(OPEN_KEYWORDS) do
-        if string.find(action, kw, 1, true) or string.find(object, kw, 1, true) then return true end
-    end
-    return false
+    return true
 end
 
 local function IsGoldCandidate(obj)
@@ -708,10 +709,11 @@ local function TryAutoInteract()
     if not hrp then return end
 
     local containerRange = _G.EspRange or 200
-    local collectRange = _G.CollectRange or 25
+    local goldRange = _G.GoldRange or 30
 
-    for _, obj in ipairs(scanList) do
+    for _, obj in ipairs(workspace:GetDescendants()) do
         if not obj or not obj.Parent then continue end
+
         local pos = GetWorldPos(obj)
         if not pos then continue end
         local dist = (hrp.Position - pos).Magnitude
@@ -723,17 +725,13 @@ local function TryAutoInteract()
             if p and IsOpenPrompt(p) then prompt = p end
         end
 
-        if not prompt and dist <= collectRange then
-            local isTool = obj:IsA("Tool") and not IsHeldByLocal(obj)
-            local isGold = IsGoldCandidate(obj)
-            if isTool or isGold then
-                prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-            end
+        if not prompt and dist <= goldRange and IsGoldCandidate(obj) then
+            prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
         end
 
         if prompt then
             local now = os.clock()
-            if not interactDebounce[obj] or now - interactDebounce[obj] > 1 then
+            if not interactDebounce[obj] or now - interactDebounce[obj] > 0.5 then
                 interactDebounce[obj] = now
                 pcall(function() fireproximityprompt(prompt) end)
             end
@@ -820,10 +818,6 @@ end)
 -- =============================================================================
 -- MAIN SCAN
 -- =============================================================================
-
-local scanIndex = 1
-local scanList = {}
-local lastScanRebuild = 0
 
 local function ProcessOneObject(obj)
     if not obj or not obj.Parent then return end
@@ -968,8 +962,8 @@ end)
 AddToggleComponent(P_Automation, "Auto-Hide (Rush/Ambush)", "AutoHide")
 AddInputComponent(P_Automation, "Auto-Hide Range:", "150", function(val) _G.AutoHideRange = val end)
 AddToggleComponent(P_Automation, "Turn 180° on Ambush Exit", "AutoHideTurn")
-AddToggleComponent(P_Automation, "Auto-Interact (Open+Collect)", "AutoInteract")
-AddInputComponent(P_Automation, "Collect Range:", "25", function(val) _G.CollectRange = val end)
+AddToggleComponent(P_Automation, "Auto-Open Drawers/Chests", "AutoInteract")
+AddInputComponent(P_Automation, "Gold Range:", "30", function(val) _G.GoldRange = val end)
 
 local GridContainer = Instance.new("Frame")
 GridContainer.Size = UDim2.new(1, 0, 0, 50); GridContainer.BackgroundTransparency = 1; GridContainer.Parent = P_Settings
