@@ -1,5 +1,5 @@
 -- =============================================================================
--- DELTA MASTER v5.6.15 — HIDE TIMEOUT + LIBRARY LAG FIX
+-- DELTA MASTER v5.6.16 — WALK-FORWARD CLOSET EXIT
 -- =============================================================================
 
 if game.CoreGui:FindFirstChild("DeltaCheatMenuV5") then
@@ -114,7 +114,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -20, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DELTA MASTER v5.6.15"
+Title.Text = "DELTA MASTER v5.6.16"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 13
 Title.Font = Enum.Font.GothamBold
@@ -301,7 +301,6 @@ local CONTAINER_KEYWORDS = {
     "drawer", "chest", "desk", "dresser", "nightstand",
     "locker", "toolbox", "cabinet", "shelf", "compartment"
 }
-local OPEN_KEYWORDS = { "open", "search", "loot", "unlock", "check", "take" }
 local DENY_KEYWORDS = { "hide", "enter", "climb", "use", "sit", "crawl" }
 local GOLD_KEYWORDS = { "gold", "coin", "cash", "money", "knobs", "golden", "goldpile", "goldbar", "goldnugget" }
 
@@ -610,7 +609,7 @@ local function FindNearestCloset()
     return bestCloset, bestDist
 end
 
-local function ToggleClosetPrompt(closet)
+local function EnterCloset(closet)
     if not closet then return false end
     local prompt = closet:FindFirstChildWhichIsA("ProximityPrompt", true)
     if not prompt then return false end
@@ -619,8 +618,17 @@ local function ToggleClosetPrompt(closet)
 end
 
 local function ExitCloset()
-    if isHiding and hidingCloset then
-        ToggleClosetPrompt(hidingCloset)
+    if isHiding then
+        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then
+            local cam = workspace.CurrentCamera
+            local dir = cam.CFrame.LookVector
+            dir = Vector3.new(dir.X, 0, dir.Z)
+            if dir.Magnitude > 0 then dir = dir.Unit end
+            hum:Move(dir, false)
+            task.wait(1)
+            hum:Move(Vector3.zero, false)
+        end
     end
     isHiding = false
     hidingCloset = nil
@@ -635,11 +643,10 @@ end
 
 local function RunAutoHide()
     if not _G.AutoHide then
-        ExitCloset()
+        if isHiding then ExitCloset() end
         return
     end
 
-    -- Force exit after timeout
     if isHiding and hideStartTime > 0 and (os.clock() - hideStartTime) > (_G.HideTimeout or 5) then
         ExitCloset()
         return
@@ -648,7 +655,7 @@ local function RunAutoHide()
     local entity, dist = FindActiveEntity()
 
     if not entity or dist > (_G.AutoHideRange or 150) then
-        ExitCloset()
+        if isHiding then ExitCloset() end
         return
     end
 
@@ -657,7 +664,7 @@ local function RunAutoHide()
         if now - hideDebounce < 0.15 then return end
         hideDebounce = now
         local closet = FindNearestCloset()
-        if closet and ToggleClosetPrompt(closet) then
+        if closet and EnterCloset(closet) then
             isHiding = true
             hidingCloset = closet
             hideStartTime = os.clock()
