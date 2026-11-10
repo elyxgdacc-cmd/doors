@@ -1,5 +1,5 @@
 -- =============================================================================
--- DELTA MASTER v5.6.10 — SPEED CAP 20, THROTTLED AUTO, RANGE-GATED
+-- DELTA MASTER v5.6.11 — AUTO-COLLECT FIX, AMBUSH ROTATION
 -- =============================================================================
 
 if game.CoreGui:FindFirstChild("DeltaCheatMenuV5") then
@@ -49,9 +49,11 @@ _G.ScannerNames = {}
 _G.AutoHide = false
 _G.AutoHideRange = 150
 _G.AutoHideEntityList = { "rush", "ambush" }
+_G.AutoHideTurn = false
+_G.AutoHideTurnEntity = "ambush"
 _G.AutoOpenContainers = false
 _G.AutoCollectItems = false
-_G.CollectRange = 15
+_G.CollectRange = 25
 
 local LightBackup = {
     Ambient = Lighting.Ambient,
@@ -115,7 +117,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -20, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DELTA MASTER v5.6.10"
+Title.Text = "DELTA MASTER v5.6.11"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 13
 Title.Font = Enum.Font.GothamBold
@@ -306,6 +308,8 @@ local CONTAINER_KEYWORDS = {
 }
 local OPEN_KEYWORDS = { "open", "search", "loot", "unlock", "check", "take" }
 local DENY_KEYWORDS = { "hide", "enter", "climb", "use", "sit", "crawl" }
+
+local GOLD_KEYWORDS = { "gold", "coin", "cash", "money", "knobs" }
 
 local MAX_ESP_OBJECTS = 60
 local MAX_SCANNER_OBJECTS = 40
@@ -577,6 +581,9 @@ local lastAutoHide = 0
 local lastAutoOpen = 0
 local lastAutoCollect = 0
 
+local originalRotation = nil
+local hasRotated = false
+
 local function IsAutoHideEntity(obj)
     if not obj or not obj.Parent then return false end
     local lname = string.lower(obj.Name)
@@ -641,16 +648,29 @@ local function RunAutoHide()
             ToggleClosetPrompt(hidingCloset)
             isHiding = false; hidingCloset = nil
         end
+        if hasRotated and originalRotation then
+            local hrp = GetLocalHRP()
+            if hrp then hrp.CFrame = CFrame.new(hrp.Position) * originalRotation end
+            hasRotated = false; originalRotation = nil
+        end
         return
     end
+
     local entity, dist = FindActiveEntity()
+
     if not entity or dist > (_G.AutoHideRange or 150) then
         if isHiding and hidingCloset then
             ToggleClosetPrompt(hidingCloset)
             isHiding = false; hidingCloset = nil
         end
+        if hasRotated and originalRotation then
+            local hrp = GetLocalHRP()
+            if hrp then hrp.CFrame = CFrame.new(hrp.Position) * originalRotation end
+            hasRotated = false; originalRotation = nil
+        end
         return
     end
+
     if not isHiding then
         local now = os.clock()
         if now - hideDebounce < 0.15 then return end
@@ -658,6 +678,25 @@ local function RunAutoHide()
         local closet = FindNearestCloset()
         if closet and ToggleClosetPrompt(closet) then
             isHiding = true; hidingCloset = closet
+        end
+    end
+
+    if _G.AutoHideTurn and entity then
+        local lname = string.lower(entity.Name)
+        if string.find(lname, _G.AutoHideTurnEntity, 1, true) then
+            if isHiding and dist > (_G.AutoHideRange or 150) * 0.5 then
+                if hidingCloset then ToggleClosetPrompt(hidingCloset) end
+                isHiding = false; hidingCloset = nil
+
+                if not hasRotated then
+                    local hrp = GetLocalHRP()
+                    if hrp then
+                        originalRotation = hrp.CFrame.Rotation
+                        hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, math.rad(180), 0) * originalRotation
+                        hasRotated = true
+                    end
+                end
+            end
         end
     end
 end
@@ -678,6 +717,17 @@ local function IsOpenPrompt(prompt)
     end
     for _, kw in ipairs(OPEN_KEYWORDS) do
         if string.find(action, kw, 1, true) or string.find(object, kw, 1, true) then return true end
+    end
+    return false
+end
+
+local function IsGoldCandidate(obj)
+    if not obj or not obj.Parent then return false end
+    if not (obj:IsA("Tool") or obj:IsA("BasePart") or obj:IsA("Model")) then return false end
+    if IsHeldByLocal(obj) then return false end
+    local lname = string.lower(obj.Name)
+    for _, kw in ipairs(GOLD_KEYWORDS) do
+        if string.find(lname, kw, 1, true) then return true end
     end
     return false
 end
@@ -708,15 +758,22 @@ local function TryAutoCollect()
     if not _G.AutoCollectItems then return end
     local hrp = GetLocalHRP()
     if not hrp then return end
-    local range = _G.CollectRange or 15
+    local range = _G.CollectRange or 25
+
     for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("Tool") and not IsHeldByLocal(obj) then
-            local pos = GetWorldPos(obj)
-            if pos and (hrp.Position - pos).Magnitude <= range then
-                local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-                if prompt then
-                    pcall(function() fireproximityprompt(prompt) end)
-                end
+        if not obj.Parent then continue end
+        local pos = GetWorldPos(obj)
+        if not pos then continue end
+        local dist = (hrp.Position - pos).Magnitude
+        if dist > range then continue end
+
+        local isTool = obj:IsA("Tool") and not IsHeldByLocal(obj)
+        local isGold = IsGoldCandidate(obj)
+
+        if isTool or isGold then
+            local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if prompt then
+                pcall(function() fireproximityprompt(prompt) end)
             end
         end
     end
@@ -907,7 +964,7 @@ task.spawn(function()
             lastAutoOpen = os.clock()
             pcall(TryAutoOpen)
         end
-        if os.clock() - lastAutoCollect > 0.5 then
+        if os.clock() - lastAutoCollect > 0.2 then
             lastAutoCollect = os.clock()
             pcall(TryAutoCollect)
         end
@@ -970,9 +1027,10 @@ end)
 
 AddToggleComponent(P_Automation, "Auto-Hide (Rush/Ambush)", "AutoHide")
 AddInputComponent(P_Automation, "Auto-Hide Range:", "150", function(val) _G.AutoHideRange = val end)
+AddToggleComponent(P_Automation, "Turn 180° on Ambush Exit", "AutoHideTurn")
 AddToggleComponent(P_Automation, "Auto-Open Containers", "AutoOpenContainers")
 AddToggleComponent(P_Automation, "Auto-Collect Items", "AutoCollectItems")
-AddInputComponent(P_Automation, "Collect Range:", "15", function(val) _G.CollectRange = val end)
+AddInputComponent(P_Automation, "Collect Range:", "25", function(val) _G.CollectRange = val end)
 
 local GridContainer = Instance.new("Frame")
 GridContainer.Size = UDim2.new(1, 0, 0, 50); GridContainer.BackgroundTransparency = 1; GridContainer.Parent = P_Settings
@@ -986,7 +1044,7 @@ for name, hex in pairs(Presets) do
 end
 
 -- =============================================================================
--- RUNTIME (SPEED CAP 20 — NO RUBBERBAND)
+-- RUNTIME
 -- =============================================================================
 
 function StartCheatEngineLoops()
