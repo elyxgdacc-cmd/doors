@@ -1,5 +1,5 @@
 -- =============================================================================
--- DELTA MASTER v5.6.17 — BACKWARD WALK EXIT
+-- DELTA MASTER v5.6.19 — LIMITLESS SPEED (NO CAP)
 -- =============================================================================
 
 if game.CoreGui:FindFirstChild("DeltaCheatMenuV5") then
@@ -114,7 +114,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -20, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DELTA MASTER v5.6.17"
+Title.Text = "DELTA MASTER v5.6.19"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 13
 Title.Font = Enum.Font.GothamBold
@@ -621,7 +621,6 @@ local function ExitCloset()
     if isHiding then
         local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
         if hum then
-            -- Walk backward relative to camera to back out of the closet
             hum:Move(Vector3.new(0, 0, 1), true)
             task.wait(1.2)
             hum:Move(Vector3.zero, false)
@@ -1006,7 +1005,8 @@ function StartCheatEngineLoops()
         if LocalPlayer.Character then
             local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
             if humanoid then
-                humanoid.WalkSpeed = math.min(_G.SpeedValue, 20)
+                -- SPEED CAP REMOVED HERE
+                humanoid.WalkSpeed = _G.SpeedValue
                 if humanoid.UseJumpPower then
                     humanoid.JumpPower = _G.JumpValue
                 else
