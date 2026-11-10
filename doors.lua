@@ -1,5 +1,5 @@
 -- =============================================================================
--- DELTA MASTER v5.6.9 — SPEED CAP 20, AUTO-HIDE, AUTO-OPEN, AUTO-COLLECT
+-- DELTA MASTER v5.6.10 — SPEED CAP 20, THROTTLED AUTO, RANGE-GATED
 -- =============================================================================
 
 if game.CoreGui:FindFirstChild("DeltaCheatMenuV5") then
@@ -47,11 +47,10 @@ _G.InteractablesEsp = false
 _G.ScannerNames = {}
 
 _G.AutoHide = false
-_G.AutoHideRange = 80
+_G.AutoHideRange = 150
 _G.AutoHideEntityList = { "rush", "ambush" }
 _G.AutoOpenContainers = false
 _G.AutoCollectItems = false
-_G.ContainerRange = 30
 _G.CollectRange = 15
 
 local LightBackup = {
@@ -116,7 +115,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -20, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DELTA MASTER v5.6.9"
+Title.Text = "DELTA MASTER v5.6.10"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 13
 Title.Font = Enum.Font.GothamBold
@@ -569,11 +568,14 @@ end
 -- AUTO FUNCTIONS
 -- =============================================================================
 
-local activeEntity = nil
 local isHiding = false
 local hidingCloset = nil
 local hideDebounce = 0
 local openDebounce = {}
+
+local lastAutoHide = 0
+local lastAutoOpen = 0
+local lastAutoCollect = 0
 
 local function IsAutoHideEntity(obj)
     if not obj or not obj.Parent then return false end
@@ -588,12 +590,15 @@ local function FindActiveEntity()
     local hrp = GetLocalHRP()
     if not hrp then return nil, math.huge end
     local closest, closestDist = nil, math.huge
+    local range = _G.AutoHideRange or 150
     for _, obj in ipairs(workspace:GetDescendants()) do
         if (obj:IsA("Model") or obj:IsA("BasePart")) and IsAutoHideEntity(obj) then
             local pos = GetWorldPos(obj)
             if pos then
                 local dist = (hrp.Position - pos).Magnitude
-                if dist < closestDist then closest, closestDist = obj, dist end
+                if dist <= range and dist < closestDist then
+                    closest, closestDist = obj, dist
+                end
             end
         end
     end
@@ -604,6 +609,7 @@ local function FindNearestCloset()
     local hrp = GetLocalHRP()
     if not hrp then return nil end
     local bestDist, bestCloset = math.huge, nil
+    local range = _G.EspRange or 200
     for _, obj in ipairs(workspace:GetDescendants()) do
         if (obj:IsA("Model") or obj:IsA("BasePart")) then
             local lname = string.lower(obj.Name)
@@ -611,7 +617,9 @@ local function FindNearestCloset()
                 local pos = GetWorldPos(obj)
                 if pos then
                     local d = (hrp.Position - pos).Magnitude
-                    if d < bestDist then bestDist, bestCloset = d, obj end
+                    if d <= range and d < bestDist then
+                        bestDist, bestCloset = d, obj
+                    end
                 end
             end
         end
@@ -636,7 +644,7 @@ local function RunAutoHide()
         return
     end
     local entity, dist = FindActiveEntity()
-    if not entity or dist > _G.AutoHideRange then
+    if not entity or dist > (_G.AutoHideRange or 150) then
         if isHiding and hidingCloset then
             ToggleClosetPrompt(hidingCloset)
             isHiding = false; hidingCloset = nil
@@ -645,7 +653,7 @@ local function RunAutoHide()
     end
     if not isHiding then
         local now = os.clock()
-        if now - hideDebounce < 0.5 then return end
+        if now - hideDebounce < 0.15 then return end
         hideDebounce = now
         local closet = FindNearestCloset()
         if closet and ToggleClosetPrompt(closet) then
@@ -678,12 +686,13 @@ local function TryAutoOpen()
     if not _G.AutoOpenContainers then return end
     local hrp = GetLocalHRP()
     if not hrp then return end
+    local range = _G.EspRange or 200
     for _, obj in ipairs(workspace:GetDescendants()) do
         if (obj:IsA("Model") or obj:IsA("BasePart")) and IsContainerName(obj.Name) then
             local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
             if prompt and IsOpenPrompt(prompt) then
                 local pos = GetWorldPos(obj)
-                if pos and (hrp.Position - pos).Magnitude <= _G.ContainerRange then
+                if pos and (hrp.Position - pos).Magnitude <= range then
                     local now = os.clock()
                     if not openDebounce[obj] or now - openDebounce[obj] > 1 then
                         openDebounce[obj] = now
@@ -699,10 +708,11 @@ local function TryAutoCollect()
     if not _G.AutoCollectItems then return end
     local hrp = GetLocalHRP()
     if not hrp then return end
+    local range = _G.CollectRange or 15
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("Tool") and not IsHeldByLocal(obj) then
             local pos = GetWorldPos(obj)
-            if pos and (hrp.Position - pos).Magnitude <= _G.CollectRange then
+            if pos and (hrp.Position - pos).Magnitude <= range then
                 local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
                 if prompt then
                     pcall(function() fireproximityprompt(prompt) end)
@@ -889,9 +899,18 @@ task.spawn(function()
             end
         end
 
-        pcall(RunAutoHide)
-        pcall(TryAutoOpen)
-        pcall(TryAutoCollect)
+        if os.clock() - lastAutoHide > 0.3 then
+            lastAutoHide = os.clock()
+            pcall(RunAutoHide)
+        end
+        if os.clock() - lastAutoOpen > 1 then
+            lastAutoOpen = os.clock()
+            pcall(TryAutoOpen)
+        end
+        if os.clock() - lastAutoCollect > 0.5 then
+            lastAutoCollect = os.clock()
+            pcall(TryAutoCollect)
+        end
     end
 end)
 
@@ -949,11 +968,9 @@ AddInputComponent(P_Combat, "Camera FOV:", "70", function(val)
     workspace.CurrentCamera.FieldOfView = val
 end)
 
--- AUTOMATION PANEL
 AddToggleComponent(P_Automation, "Auto-Hide (Rush/Ambush)", "AutoHide")
-AddInputComponent(P_Automation, "Auto-Hide Range:", "80", function(val) _G.AutoHideRange = val end)
+AddInputComponent(P_Automation, "Auto-Hide Range:", "150", function(val) _G.AutoHideRange = val end)
 AddToggleComponent(P_Automation, "Auto-Open Containers", "AutoOpenContainers")
-AddInputComponent(P_Automation, "Container Range:", "30", function(val) _G.ContainerRange = val end)
 AddToggleComponent(P_Automation, "Auto-Collect Items", "AutoCollectItems")
 AddInputComponent(P_Automation, "Collect Range:", "15", function(val) _G.CollectRange = val end)
 
