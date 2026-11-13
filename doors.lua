@@ -587,19 +587,41 @@ local function FindActiveEntity()
     return closest, closestDist
 end
 
+-- [PATCHED] Floor 1 + Floor 2 closet detection
+local function IsClosetObject(obj)
+    if not obj or not obj.Parent then return false end
+    if not (obj:IsA("Model") or obj:IsA("BasePart")) then return false end
+    local mod = obj:GetAttribute("LoadModule")
+    if mod and string.lower(tostring(mod)) == "wardrobe" then return true end
+    local lname = string.lower(obj.Name)
+    if string.find(lname, "closet", 1, true)
+        or string.find(lname, "wardrobe", 1, true)
+        or string.find(lname, "locker", 1, true) then return true end
+    local p = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+    if p and string.lower(p.ActionText or "") == "hide" then return true end
+    return false
+end
+
+local function GetHidePrompt(closet)
+    if not closet then return nil end
+    local p = closet:FindFirstChildWhichIsA("ProximityPrompt", true)
+    if p and string.lower(p.ActionText or "") == "hide" then return p end
+    return nil
+end
+
 local function FindNearestCloset()
     local hrp = GetLocalHRP()
     if not hrp then return nil end
     local bestDist, bestCloset = math.huge, nil
-    local range = _G.EspRange or 200
     for _, obj in ipairs(workspace:GetDescendants()) do
-        if (obj:IsA("Model") or obj:IsA("BasePart")) then
-            local lname = string.lower(obj.Name)
-            if string.find(lname, "closet", 1, true) or string.find(lname, "wardrobe", 1, true) then
+        if IsClosetObject(obj) then
+            local prompt = GetHidePrompt(obj)
+            if prompt and prompt.Enabled then
                 local pos = GetWorldPos(obj)
                 if pos then
                     local d = (hrp.Position - pos).Magnitude
-                    if d <= range and d < bestDist then
+                    local maxReach = prompt.MaxActivationDistance or 6
+                    if d <= maxReach + 1.5 and d < bestDist then
                         bestDist, bestCloset = d, obj
                     end
                 end
@@ -611,10 +633,23 @@ end
 
 local function EnterCloset(closet)
     if not closet then return false end
-    local prompt = closet:FindFirstChildWhichIsA("ProximityPrompt", true)
-    if not prompt then return false end
+    local prompt = GetHidePrompt(closet)
+    if not prompt or not prompt.Enabled then return false end
+    local hrp = GetLocalHRP()
+    if not hrp then return false end
+    local pos = GetWorldPos(closet)
+    if not pos then return false end
+    if (hrp.Position - pos).Magnitude > (prompt.MaxActivationDistance + 0.5) then
+        return false
+    end
     pcall(function() fireproximityprompt(prompt) end)
-    return true
+    task.wait(0.3)
+    if prompt.Enabled then
+        task.wait(0.15)
+        pcall(function() fireproximityprompt(prompt) end)
+        task.wait(0.2)
+    end
+    return not prompt.Enabled
 end
 
 local function ExitCloset()
